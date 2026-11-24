@@ -1,9 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { getExpenses, getBudgets, addExpense } from '../lib/firestore';
-import { parseBankStatementFile } from '../lib/statementParser';
+import { getExpenses, getBudgets } from '../lib/firestore';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
 import toast from 'react-hot-toast';
 
@@ -42,16 +41,6 @@ export default function Dashboard() {
   const [weekly, setWeekly]   = useState([]);
   const [recent, setRecent]   = useState([]);
   const [budgets, setBudgets] = useState([]);
-  const [allExpenses, setAllExpenses] = useState([]);
-
-  // Smart Bank Statement Importer state
-  const [showImportModal, setShowImportModal]     = useState(false);
-  const [parsingStatement, setParsingStatement]   = useState(false);
-  const [statementRows, setStatementRows]         = useState([]);
-  const [selectedRows, setSelectedRows]           = useState(new Set());
-  const [importMeta, setImportMeta]               = useState(null);
-  const [importing, setImporting]                 = useState(false);
-  const statementFileRef                          = useRef(null);
 
   const loadDashboardData = useCallback(() => {
     if (!user) return;
@@ -66,7 +55,6 @@ export default function Dashboard() {
       getBudgets(user.uid, month, year),
     ])
       .then(([allExp, bud]) => {
-        setAllExpenses(allExp);
         // Current month calculations
         const curExpenses = allExp.filter((e) => {
           const d = new Date(e.date);
@@ -137,102 +125,6 @@ export default function Dashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  // Open Statement Import modal
-  const handleOpenImportModal = () => {
-    setStatementRows([]);
-    setSelectedRows(new Set());
-    setImportMeta(null);
-    setShowImportModal(true);
-  };
-
-  // Parse uploaded CSV / Excel bank statement
-  const handleStatementFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-
-    setParsingStatement(true);
-    try {
-      const { transactions, skippedCredits, duplicateCount } = await parseBankStatementFile(file, allExpenses);
-      setStatementRows(transactions);
-      setImportMeta({ fileName: file.name, skippedCredits, duplicateCount });
-      // Auto-select only non-duplicate debit rows
-      setSelectedRows(new Set(transactions.filter((t) => !t.isDuplicate).map((t) => t.rowId)));
-      if (transactions.length === 0) {
-        toast('No debit transactions found in this file.', { icon: 'ℹ️' });
-      }
-    } catch (err) {
-      toast.error(err.message || 'Could not parse statement file');
-    } finally {
-      setParsingStatement(false);
-    }
-  };
-
-  // Toggle row selection
-  const toggleSelectRow = (rowId) => {
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId);
-      else next.add(rowId);
-      return next;
-    });
-  };
-
-  // Download a sample Indian bank CSV for quick testing
-  const handleDownloadSampleCsv = () => {
-    const today = new Date();
-    const fmt = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-    const d1 = new Date(today); d1.setDate(today.getDate() - 1);
-    const d2 = new Date(today); d2.setDate(today.getDate() - 2);
-    const csv = [
-      'Date,Narration,Withdrawal Amt.,Deposit Amt.',
-      `${fmt(today)},UPI/DR/433190821890/SWIGGY/ICIC/swiggy@icici,450.00,`,
-      `${fmt(d1)},UPI/DR/433190821891/UBER INDIA/HDFC/uber@hdfcbank,265.00,`,
-      `${fmt(d1)},UPI/DR/433190821892/BLINKIT GROCERIES/SBIN/blinkit@sbi,840.00,`,
-      `${fmt(d2)},POS 4111XXXXXX8820 STARBUCKS COFFEE,320.00,`,
-      `${fmt(d2)},NEFT CR-SALARY-ACME CORP,,65000.00`,
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'sample_bank_statement.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Import chosen statement transactions
-  const handleImportSelected = async () => {
-    if (!user) return;
-    const toImport = statementRows.filter((t) => selectedRows.has(t.rowId));
-    if (toImport.length === 0) {
-      toast.error('Please select at least 1 transaction to import');
-      return;
-    }
-
-    setImporting(true);
-    try {
-      for (const t of toImport) {
-        await addExpense(user.uid, {
-          title: t.title,
-          amount: Number(t.amount),
-          category: t.category,
-          date: t.date,
-          paymentMethod: t.paymentMethod || 'upi',
-          note: `📥 Imported from ${importMeta?.fileName || 'Bank Statement'}`,
-          isRecurring: false,
-        });
-      }
-      toast.success(`Successfully imported ${toImport.length} transactions! 📥`);
-      setShowImportModal(false);
-      loadDashboardData();
-    } catch {
-      toast.error('Import failed');
-    } finally {
-      setImporting(false);
-    }
-  };
-
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="text-center">
@@ -268,18 +160,9 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Good {greeting}, {displayName.split(' ')[0]}! 👋</h1>
           <p className="text-gray-500 text-sm mt-0.5">Here's your financial overview</p>
         </div>
-        <div className="flex items-center gap-2.5 self-start sm:self-auto">
-          <button
-            onClick={handleOpenImportModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium text-sm rounded-xl shadow-sm hover:shadow transition-all"
-            title="Import debit transactions from any Indian Bank CSV or Excel statement"
-          >
-            <span>📥</span> Import Statement
-          </button>
-          <Link to="/add-expense" className="btn-primary flex items-center gap-2">
-            <span>➕</span> Add Expense
-          </Link>
-        </div>
+        <Link to="/add-expense" className="btn-primary self-start sm:self-auto flex items-center gap-2">
+          <span>➕</span> Add Expense
+        </Link>
       </div>
 
       {/* Summary Cards */}
@@ -429,186 +312,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Smart Bank Statement Importer Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl shadow-sm">
-                  📥
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">Import Bank Statement (CSV / Excel)</h3>
-                  <p className="text-xs text-gray-500">Supports HDFC, SBI, ICICI, Axis, Kotak & UPI exports — parsed privately in your browser</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Hidden File Input */}
-            <input
-              ref={statementFileRef}
-              type="file"
-              accept=".csv,.xls,.xlsx"
-              onChange={handleStatementFileChange}
-              className="hidden"
-            />
-
-            {/* Modal Body */}
-            <div className="p-5 overflow-y-auto flex-1 space-y-4">
-              {parsingStatement ? (
-                <div className="py-12 text-center">
-                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                  <p className="text-sm font-semibold text-gray-800">Analyzing your bank statement...</p>
-                  <p className="text-xs text-gray-400 mt-1">Detecting debits, categorizing merchants & checking duplicates</p>
-                </div>
-              ) : statementRows.length === 0 ? (
-                <div className="py-6 text-center space-y-4">
-                  <div
-                    onClick={() => statementFileRef.current?.click()}
-                    className="border-2 border-dashed border-blue-200 hover:border-blue-400 bg-blue-50/40 hover:bg-blue-50/70 rounded-2xl p-8 cursor-pointer transition-all"
-                  >
-                    <div className="text-4xl mb-2">📄</div>
-                    <p className="text-sm font-semibold text-gray-800">Click to choose a Bank Statement file</p>
-                    <p className="text-xs text-gray-500 mt-1">Accepts <strong>.CSV</strong>, <strong>.XLS</strong>, or <strong>.XLSX</strong></p>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-gray-500 bg-gray-50 p-3 rounded-xl">
-                    <span>🔒 100% private: parsed locally in your browser</span>
-                    <button
-                      type="button"
-                      onClick={handleDownloadSampleCsv}
-                      className="text-blue-600 font-semibold hover:underline"
-                    >
-                      Download Sample CSV
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 pb-1">
-                    <div>
-                      Found <strong className="text-gray-900 font-bold">{statementRows.length}</strong> debits
-                      {importMeta?.skippedCredits > 0 && (
-                        <span className="ml-1 text-gray-400">({importMeta.skippedCredits} credits skipped)</span>
-                      )}
-                      {importMeta?.duplicateCount > 0 && (
-                        <span className="ml-1 text-amber-600 font-medium">· {importMeta.duplicateCount} possible duplicates unchecked</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => statementFileRef.current?.click()}
-                        className="text-gray-500 hover:text-gray-700 font-medium"
-                      >
-                        Change File
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (selectedRows.size === statementRows.length) {
-                            setSelectedRows(new Set());
-                          } else {
-                            setSelectedRows(new Set(statementRows.map((t) => t.rowId)));
-                          }
-                        }}
-                        className="text-blue-600 font-semibold hover:underline"
-                      >
-                        {selectedRows.size === statementRows.length ? 'Deselect All' : 'Select All'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    {statementRows.map((item) => {
-                      const isSelected = selectedRows.has(item.rowId);
-                      const cat = CATEGORIES[item.category] || CATEGORIES.other;
-                      return (
-                        <div
-                          key={item.rowId}
-                          onClick={() => toggleSelectRow(item.rowId)}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
-                            isSelected
-                              ? 'border-blue-500 bg-blue-50/50 shadow-sm'
-                              : 'border-gray-200 hover:border-gray-300 bg-white opacity-75'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            className="mt-1 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0" style={{ backgroundColor: cat.bgColor }}>
-                            {cat.icon}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <p className="text-sm font-semibold text-gray-900 truncate">{item.title}</p>
-                                {item.isDuplicate && (
-                                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold flex-shrink-0">
-                                    Duplicate
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-sm font-bold text-red-600 flex-shrink-0">
-                                -{formatCurrency(item.amount, currency)}
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-500 truncate mt-0.5">{item.rawDescription}</p>
-                            <p className="text-[11px] text-gray-400 mt-1">
-                              {cat.label} · {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setShowImportModal(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 font-medium text-sm rounded-xl hover:bg-gray-100 transition-colors"
-              >
-                Cancel
-              </button>
-              {statementRows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleImportSelected}
-                  disabled={importing || selectedRows.size === 0}
-                  className="btn-primary py-2 px-5 text-sm flex items-center gap-2 disabled:opacity-50"
-                >
-                  {importing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Importing...
-                    </>
-                  ) : (
-                    <>
-                      <span>📥</span> Import {selectedRows.size} Selected
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
