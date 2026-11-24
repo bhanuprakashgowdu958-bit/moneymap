@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { getMonthlyStats, getWeeklyData, getRecentExpenses, getBudgets } from '../lib/firestore';
+import { fetchGmailTransactions, importGmailTransactions } from '../lib/gmailSync';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
 import toast from 'react-hot-toast';
 
@@ -42,7 +43,14 @@ export default function Dashboard() {
   const [recent, setRecent]   = useState([]);
   const [budgets, setBudgets] = useState([]);
 
-  useEffect(() => {
+  // Gmail Auto-Sync state
+  const [showGmailModal, setShowGmailModal] = useState(false);
+  const [syncingGmail, setSyncingGmail]     = useState(false);
+  const [gmailPending, setGmailPending]     = useState([]);
+  const [selectedEmails, setSelectedEmails] = useState(new Set());
+  const [importing, setImporting]           = useState(false);
+
+  const loadDashboardData = useCallback(() => {
     if (!user) return;
     const now = new Date();
     const month = now.getMonth() + 1;
@@ -84,6 +92,57 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, [user]);
 
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // Open Gmail Sync modal and fetch detected emails
+  const handleOpenGmailSync = async () => {
+    setShowGmailModal(true);
+    setSyncingGmail(true);
+    try {
+      const list = await fetchGmailTransactions();
+      setGmailPending(list);
+      setSelectedEmails(new Set(list.map((t) => t.emailId)));
+    } catch {
+      toast.error('Failed to scan bank transaction emails');
+    } finally {
+      setSyncingGmail(false);
+    }
+  };
+
+  // Toggle selection
+  const toggleSelectEmail = (id) => {
+    setSelectedEmails((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Import chosen transactions
+  const handleImportSelected = async () => {
+    if (!user) return;
+    const toImport = gmailPending.filter((t) => selectedEmails.has(t.emailId));
+    if (toImport.length === 0) {
+      toast.error('Please select at least 1 transaction to import');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const count = await importGmailTransactions(toImport, user.uid);
+      toast.success(`Successfully imported ${count} transactions from Gmail! ⚡`);
+      setShowGmailModal(false);
+      loadDashboardData();
+    } catch {
+      toast.error('Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="text-center">
@@ -119,9 +178,18 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-gray-900">Good {greeting}, {displayName.split(' ')[0]}! 👋</h1>
           <p className="text-gray-500 text-sm mt-0.5">Here's your financial overview</p>
         </div>
-        <Link to="/add-expense" className="btn-primary flex items-center gap-2 self-start sm:self-auto">
-          <span>➕</span> Add Expense
-        </Link>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            onClick={handleOpenGmailSync}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium text-sm rounded-xl shadow-sm hover:shadow transition-all"
+            title="Scan bank debit emails from Gmail and auto-import expenses"
+          >
+            <span>⚡</span> Sync Bank Emails
+          </button>
+          <Link to="/add-expense" className="btn-primary flex items-center gap-2">
+            <span>➕</span> Add Expense
+          </Link>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -266,6 +334,139 @@ export default function Dashboard() {
                   ? ` That's ${changeAbs}% more than last month. Consider reviewing food delivery expenses.`
                   : ` Great job! You're spending ${changeAbs}% less than last month. Keep it up! 🎉`}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gmail Auto-Sync Modal */}
+      {showGmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl shadow-sm">
+                  ⚡
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Gmail Bank Transaction Auto-Sync</h3>
+                  <p className="text-xs text-gray-500">Detect & import debit alerts from HDFC, ICICI, SBI, UPI, Swiggy, etc.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGmailModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              {syncingGmail ? (
+                <div className="py-12 text-center">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                  <p className="text-sm font-semibold text-gray-800">Scanning your emails for bank transactions...</p>
+                  <p className="text-xs text-gray-400 mt-1">Filtering UPI debits, card transactions & food orders</p>
+                </div>
+              ) : gmailPending.length === 0 ? (
+                <div className="py-10 text-center text-gray-500">
+                  <div className="text-4xl mb-2">🎉</div>
+                  <p className="text-base font-semibold text-gray-800">No un-synced transactions found!</p>
+                  <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                    All detected bank debit emails and receipts have already been imported into MoneyMap.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-xs text-gray-500 pb-1">
+                    <span>Found <strong className="text-gray-900 font-bold">{gmailPending.length}</strong> new debit transactions</span>
+                    <button
+                      onClick={() => {
+                        if (selectedEmails.size === gmailPending.length) {
+                          setSelectedEmails(new Set());
+                        } else {
+                          setSelectedEmails(new Set(gmailPending.map((t) => t.emailId)));
+                        }
+                      }}
+                      className="text-blue-600 font-semibold hover:underline"
+                    >
+                      {selectedEmails.size === gmailPending.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {gmailPending.map((item) => {
+                      const isSelected = selectedEmails.has(item.emailId);
+                      const cat = CATEGORIES[item.category] || CATEGORIES.other;
+                      return (
+                        <div
+                          key={item.emailId}
+                          onClick={() => toggleSelectEmail(item.emailId)}
+                          className={`p-3 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50/50 shadow-sm'
+                              : 'border-gray-200 hover:border-gray-300 bg-white'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}} // Handled by parent div
+                            className="mt-1 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0" style={{ backgroundColor: cat.bgColor }}>
+                            {cat.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{item.title}</p>
+                              <span className="text-sm font-bold text-red-600 flex-shrink-0">
+                                -{formatCurrency(item.amount, currency)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-500 truncate mt-0.5">{item.subject}</p>
+                            <p className="text-[11px] text-gray-400 mt-1">
+                              {item.from} · {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setShowGmailModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 font-medium text-sm rounded-xl hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              {gmailPending.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleImportSelected}
+                  disabled={importing || selectedEmails.size === 0}
+                  className="btn-primary py-2 px-5 text-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {importing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <span>📥</span> Import {selectedEmails.size} Selected
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

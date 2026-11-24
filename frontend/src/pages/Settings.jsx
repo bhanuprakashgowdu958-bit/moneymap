@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
+import { isGmailSyncConnected, connectGmailSync, disconnectGmailSync } from '../lib/gmailSync';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -16,7 +17,30 @@ export default function Settings() {
   const [geminiKey, setGeminiKey] = useState(() => {
     return (typeof window !== 'undefined' && localStorage.getItem('gemini_api_key')) || '';
   });
+  const [gmailConnected, setGmailConnected] = useState(() => isGmailSyncConnected());
+  const [connectingGmail, setConnectingGmail] = useState(false);
   const fileInputRef = useRef(null);
+
+  const handleToggleGmailSync = async () => {
+    if (gmailConnected) {
+      disconnectGmailSync();
+      setGmailConnected(false);
+      toast.success('Gmail Transaction Auto-Sync disconnected.');
+    } else {
+      setConnectingGmail(true);
+      try {
+        const res = await connectGmailSync();
+        if (res.success) {
+          setGmailConnected(true);
+          toast.success('Gmail Auto-Sync connected! Bank debit alerts will now be detected ⚡');
+        }
+      } catch (err) {
+        toast.error('Failed to connect Gmail');
+      } finally {
+        setConnectingGmail(false);
+      }
+    }
+  };
 
   const handleSaveGeminiKey = () => {
     if (geminiKey.trim()) {
@@ -258,7 +282,55 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Cloud Stack Info */}
+      {/* Gmail Bank Transaction Auto-Sync */}
+      <div className="card border border-amber-500/20 bg-gradient-to-br from-white to-amber-500/5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">⚡</span>
+            <h2 className="text-base font-semibold text-gray-900">Gmail Transaction Auto-Sync</h2>
+          </div>
+          <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${gmailConnected ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600'}`}>
+            {gmailConnected ? 'Sync Active ⚡' : 'Not Connected'}
+          </span>
+        </div>
+        <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+          Automatically scans incoming bank debit alert emails (HDFC, ICICI, SBI, Axis, Swiggy, Zomato, Uber, Blinkit) received on your Google account and captures expenses directly into MoneyMap without manual typing.
+        </p>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white/80 rounded-xl border border-amber-200/50">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
+              ✉️
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">
+                {gmailConnected ? 'Bank Alert Scanner Enabled' : 'Connect Your Google Mailbox'}
+              </p>
+              <p className="text-xs text-gray-500">
+                {gmailConnected ? 'Ready to sync debit alerts with 1-click from Dashboard' : 'Uses read-only permission for transactional receipts'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={connectingGmail}
+            onClick={handleToggleGmailSync}
+            className={`text-sm py-2 px-4 rounded-xl font-medium transition-all flex items-center gap-2 ${
+              gmailConnected
+                ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
+                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
+            }`}
+          >
+            {connectingGmail ? (
+              <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></span> Connecting...</>
+            ) : gmailConnected ? (
+              'Disconnect Sync'
+            ) : (
+              '⚡ Connect Gmail Sync'
+            )}
+          </button>
+        </div>
+      </div>
       <div className="card">
         <h2 className="text-base font-semibold text-gray-900 mb-4">Infrastructure & Cloud Services</h2>
         <div className="space-y-3 text-sm text-gray-600">
