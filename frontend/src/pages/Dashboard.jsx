@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useAuth } from '../context/AuthContext';
 import { getExpenses, getBudgets } from '../lib/firestore';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
+import SpendingCalendar from '../components/SpendingCalendar';
 import toast from 'react-hot-toast';
 
 const RADIAN = Math.PI / 180;
@@ -41,6 +42,7 @@ export default function Dashboard() {
   const [weekly, setWeekly]   = useState([]);
   const [recent, setRecent]   = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [allExpenses, setAllExpenses] = useState([]);
 
   const loadDashboardData = useCallback(() => {
     if (!user) return;
@@ -55,6 +57,7 @@ export default function Dashboard() {
       getBudgets(user.uid, month, year),
     ])
       .then(([allExp, bud]) => {
+        setAllExpenses(allExp);
         // Current month calculations
         const curExpenses = allExp.filter((e) => {
           const d = new Date(e.date);
@@ -294,6 +297,9 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Interactive Spending Calendar */}
+      <SpendingCalendar expenses={allExpenses} currency={currency} />
 
       {stats.total > 0 && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">

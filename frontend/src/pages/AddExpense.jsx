@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { addExpense } from '../lib/firestore';
 import { uploadToCloudinary } from '../lib/cloudinary';
@@ -29,6 +29,11 @@ function sanitizeAmount(val) {
 
 export default function AddExpense() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const paramDate = searchParams.get('date');
+  const initialDate = paramDate && /^\d{4}-\d{2}-\d{2}$/.test(paramDate)
+    ? paramDate
+    : new Date().toISOString().split('T')[0];
   const { user, currency } = useAuth();
   const [loading, setLoading] = useState(false);
   const [magicInput, setMagicInput] = useState('');
@@ -51,7 +56,7 @@ export default function AddExpense() {
     title:         '',
     amount:        '',
     category:      'food-delivery',
-    date:          new Date().toISOString().split('T')[0],
+    date:          initialDate,
     paymentMethod: 'upi',
     note:          '',
     isRecurring:   false,
