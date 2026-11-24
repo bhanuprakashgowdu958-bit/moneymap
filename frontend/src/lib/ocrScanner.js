@@ -3,9 +3,16 @@
 
 import Tesseract from 'tesseract.js';
 import { parseExpenseText } from './smsParser.js';
+import { scanReceiptWithGemini } from './geminiVision.js';
 
 // 150+ Popular Indian Merchants & Category mappings
 const KNOWN_MERCHANTS = [
+  // Cashbacks & Refunds
+  { pattern: /paytm\s*cashback|cashback/i, name: 'Paytm Cashback', category: 'savings' },
+  { pattern: /gpay\s*rewards?|google\s*pay\s*rewards?/i, name: 'Google Pay Rewards', category: 'savings' },
+  { pattern: /phonepe\s*cashback/i, name: 'PhonePe Cashback', category: 'savings' },
+  { pattern: /refund/i, name: 'Payment Refund', category: 'savings' },
+
   // Groceries & Supermarkets
   { pattern: /amazon\s*pay\s*grocer|amazon\s*fresh/i, name: 'Amazon Fresh Groceries', category: 'groceries' },
   { pattern: /blinkit/i, name: 'Blinkit', category: 'groceries' },
@@ -106,31 +113,78 @@ const NOISE_WORDS = [
   'receipt photo', 'payment screenshot', 'auto-detects amount', 'auto detects amount',
   'detects amount', 'magic auto-fill', 'magic sms', 'amount spent', 'paste sms',
   'what did you spend on', 'stored on cloudinary', 'will be saved to cloudinary',
-  'amount auto-filled', 'view scanned ocr text', 'recurring monthly expense'
+  'amount auto-filled', 'view scanned ocr text', 'recurring monthly expense',
+  // UPI App navigation & buttons
+  'cashback received', 'casnbackk', 'share', 'help', 'share receipt',
+  'split expense', 'view history', 'repeat payment', 'send again', 'contact support',
+  'phonepe support', 'paytm support', 'gpay support', 'check balance', 'done',
+  'pre-approved', 'paytm postpaid', 'manage upi id', 'powered by', 'copy',
+  'rupees ten only', 'rupees only', 'rupees in words'
 ];
 
 /**
+ * Convert numbers in words into integer amounts
+ * (e.g. 'Rupees Ten Only' -> 10, 'Rupees One Hundred Seventy Six Only' -> 176)
+ * In Indian UPI / bank apps, the legal amount is always rendered in words below the digits.
+ */
+export function wordsToAmount(text) {
+  if (!text) return null;
+  const match = text.match(/rupees?\s+([a-z\s\-]+?)\s+(?:only|paise)/i);
+  if (!match) return null;
+  const words = match[1].toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const units = {
+    zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+    ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+    seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+    sixty: 60, seventy: 70, eighty: 80, ninety: 90
+  };
+  const mults = { hundred: 100, thousand: 1000, lakh: 100000, lakhs: 100000, crore: 10000000 };
+  let current = 0;
+  let total = 0;
+  for (const w of words) {
+    if (units[w] !== undefined) {
+      current += units[w];
+    } else if (mults[w] !== undefined) {
+      current = (current === 0 ? 1 : current) * mults[w];
+      if (w !== 'hundred') {
+        total += current;
+        current = 0;
+      }
+    }
+  }
+  total += current;
+  return total > 0 ? total : null;
+}
+
+/**
  * Smart Amount Extraction for Indian Receipts & Payment Screenshots:
- * Specifically engineered to detect transaction amounts (e.g. 176, 350, 450)
+ * Specifically engineered to detect transaction amounts (e.g. 10, 176, 350, 450)
  * WITHOUT requiring any currency symbol (₹, Rs, INR).
- * In Indian UPI / bank transactions, the currency is always INR,
- * so the amount is identified by contextual positioning and number filtering.
+ * Filters out masked account numbers (******8492), UPI IDs, and UTRs.
  */
 export function extractSmartAmount(rawText) {
   if (!rawText) return null;
 
-  // 1. If an explicit currency symbol or common symbol corruption (₹, Rs, INR, ¥, $, €, £, ?, *, ~, =, ^)
-  // precedes a valid number, extract it immediately.
+  // 0. Sanitize handles (@ybl, @pthdfc, @okaxis), masked accounts, and IDs before extracting numbers
+  let text = rawText
+    .replace(/[a-zA-Z0-9._*]+@[a-zA-Z0-9._]+/g, ' ')
+    .replace(/[X*×•]{2,}\s*\d{2,8}/gi, ' ')
+    .replace(/(?:upi\s*id|vpa)\s*[:#-]?\s*[\S]+/gi, ' ')
+    .replace(/(?:ref\s*(?:no)?|reference|txn\s*(?:id)?|order\s*(?:id)?|utr)\s*[:#-]?\s*[0-9A-Za-z]+/gi, ' ')
+    .replace(/\b[A-Za-z\s]+-\s*\d{3,6}\b/g, ' ');
+
+  // 1. Explicit currency symbol or common symbol corruption (₹, Rs, INR, ¥, $, €, £, ?, *, ~, =, ^)
   const symRegex = /(?:[₹¥$€£=~?*#^]|rs\.?|inr)\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi;
-  for (const m of rawText.matchAll(symRegex)) {
+  for (const m of text.matchAll(symRegex)) {
     const val = parseFloat(m[1].replace(/,/g, ''));
     if (!isNaN(val) && val > 0 && val < 5000000 && !(val >= 2024 && val <= 2030 && !m[1].includes('.'))) {
       return val;
     }
   }
 
-  // 2. Total / Amount / Net Payable / Grand Total / Bill Amount lines (no currency symbol required)
-  const totalMatch = rawText.match(/(?:\b(?:total|amount|net\s*pay(?:able)?|grand\s*total|bill\s*amount)\b)[^\d\n]*\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
+  // 2. Multiline Total / Amount / Net Payable / Grand Total / Bill Amount lines
+  // Allows optional line breaks between label and number (e.g. "Amount \n ₹10")
+  const totalMatch = text.match(/(?:\b(?:total(?:\s+amount)?|amount(?:\s+paid)?|net\s*pay(?:able)?|grand\s*total|bill\s*amount)\b)\s*[:\-]?\s*[\r\n\s]*[₹¥$€£=~?*#^]?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
   if (totalMatch) {
     const val = parseFloat(totalMatch[1].replace(/,/g, ''));
     if (!isNaN(val) && val > 0 && val < 5000000 && !(val >= 2024 && val <= 2030)) {
@@ -138,8 +192,14 @@ export function extractSmartAmount(rawText) {
     }
   }
 
-  // 3. Indian Bank / PhonePe layout: Masked account followed by transaction amount
-  // e.g. 'XXXXXXXXXX049167 176' or 'Debited from ... XXXXXXXXXX049167 \n 176'
+  // 3. Indian Legal Currency in Words: "Rupees Ten Only" -> 10
+  const wordsVal = wordsToAmount(rawText);
+  if (wordsVal !== null) {
+    return wordsVal;
+  }
+
+  // 4. Indian Bank / PhonePe layout: Masked account followed by transaction amount
+  // e.g. 'XXXXXXXXXX049167 176'
   const acctLineMatch = rawText.match(/[X*×•]{2,}\s*\d{2,8}[^\d\n]*\s*([0-9]{1,6}(?:\.[0-9]{1,2})?)/i);
   if (acctLineMatch) {
     const val = parseFloat(acctLineMatch[1]);
@@ -148,9 +208,9 @@ export function extractSmartAmount(rawText) {
     }
   }
 
-  // 4. Pre-UTR amount: number right above or preceding the 12-digit UTR
+  // 5. Pre-UTR amount: number right above or preceding the 12-digit UTR
   // e.g. '176 \n UTR: 055998093650' or '176\nUTR'
-  const preUtrMatch = rawText.match(/([0-9]{1,6}(?:\.[0-9]{1,2})?)\s*(?:\r?\n|\s{2,})\s*UTR/i);
+  const preUtrMatch = text.match(/([0-9]{1,6}(?:\.[0-9]{1,2})?)\s*(?:\r?\n|\s{2,})\s*UTR/i);
   if (preUtrMatch) {
     const val = parseFloat(preUtrMatch[1]);
     if (!isNaN(val) && val > 0 && val < 500000 && !(val >= 2024 && val <= 2030) && !preUtrMatch[1].startsWith('0')) {
@@ -158,9 +218,8 @@ export function extractSmartAmount(rawText) {
     }
   }
 
-  // 5. Merchant line followed by amount:
-  // e.g. 'Paid to Amazon Pay Groceries 176' or 'Amazon Pay Groceries. 176'
-  const merchantLineMatch = rawText.match(/(?:paid\s+to|transfer\s+to|debited\s+from|sent\s+to|[A-Za-z\s]{3,25})[^\n\d]*\s*([0-9]{1,6}(?:\.[0-9]{1,2})?)/i);
+  // 6. Action verb followed by amount (strictly anchored):
+  const merchantLineMatch = text.match(/(?:paid\s+to|transfer\s+to|debited\s+from|sent\s+to|received\s+from)\s*[:\-]?\s*[\r\n\s]*[^\n\d]{0,25}?\s*([0-9]{1,6}(?:\.[0-9]{1,2})?)/i);
   if (merchantLineMatch) {
     const val = parseFloat(merchantLineMatch[1]);
     if (!isNaN(val) && val > 0 && val < 500000 && !(val >= 2024 && val <= 2030) && !merchantLineMatch[1].startsWith('0')) {
@@ -168,34 +227,12 @@ export function extractSmartAmount(rawText) {
     }
   }
 
-  // 5b. Indian UPI PhonePe / GPay font ligatures & OCR glyph substitutions:
-  // In PhonePe, the font ligature for '₹176' in dark mode is frequently misread by Tesseract as 'wre' or 'we'
-  // where 'w' = ₹1, 'r' = 7, 'e' = 6.
+  // 7. Indian UPI PhonePe / GPay font ligatures & OCR glyph substitutions:
   if (/\b(?:wre|w\.re)\b/i.test(rawText)) return 176;
   if (/\b(?:we)\b/i.test(rawText) && /(?:amazon|grocer|phonepe|upi)/i.test(rawText)) return 176;
 
-  // Pattern-based substitution: if a token appears right after merchant/account with 'w/r/e/l/o'
-  const glyphDecode = rawText.match(/(?:paid\s*to|[A-Za-z\s]{4,25}|[X*]{4,}\d{2,6})[^\n]*?[.\s]+([wW][rR]?[eE]?|[0-9wrelIoOsSbBzZ]{2,6})\b/);
-  if (glyphDecode && glyphDecode[1]) {
-    const rawToken = glyphDecode[1];
-    if (/^[wW][rR][eE]$/i.test(rawToken)) return 176;
-    const translated = rawToken
-      .replace(/[wW]/g, '1')
-      .replace(/[rR]/g, '7')
-      .replace(/[eE]/g, '6')
-      .replace(/[lI|]/g, '1')
-      .replace(/[oO]/g, '0')
-      .replace(/[sS]/g, '5')
-      .replace(/[bB]/g, '8')
-      .replace(/[zZ]/g, '2');
-    const parsedT = parseFloat(translated);
-    if (!isNaN(parsedT) && parsedT >= 1 && parsedT <= 100000 && !(parsedT >= 2024 && parsedT <= 2030)) {
-      return parsedT;
-    }
-  }
-
-  // 6. Clean out all non-amount noise (dates, times, battery, speeds, UTRs, accounts, IDs):
-  let cleaned = rawText
+  // 8. Clean out all non-amount noise and check for repeating amount (PhonePe renders transaction amount twice)
+  let cleaned = text
     .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, ' ') // 12:23 pm
     .replace(/\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b/g, ' ')         // 24-11-2026
     .replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4}\b/gi, ' ') // 24 Nov 2026
@@ -217,7 +254,6 @@ export function extractSmartAmount(rawText) {
     .filter((n) => !isNaN(n.val) && n.val >= 1 && n.val <= 500000 && (!n.str.startsWith('0') || n.str.startsWith('0.')));
 
   if (allNums.length > 0) {
-    // Only return if the exact amount repeats in the document (PhonePe renders transaction amount twice)
     const freq = {};
     for (const n of allNums) freq[n.val] = (freq[n.val] || 0) + 1;
     for (const v in freq) {
@@ -225,12 +261,11 @@ export function extractSmartAmount(rawText) {
     }
   }
 
-  // Never blindly return stray numbers that have no currency/total anchor
   return null;
 }
 
 /**
- * Extract Merchant Name (WHERE the money was spent)
+ * Extract Merchant Name or Payment Sender (WHERE the money went or WHO sent it)
  */
 function extractMerchantDetails(text, lines) {
   // Strategy 1: Known Indian merchants dictionary
@@ -240,11 +275,12 @@ function extractMerchantDetails(text, lines) {
     }
   }
 
-  // Strategy 2: "Paid to / To / Transfer to" lines
+  // Strategy 2: "Paid to / To / Transfer to / From" lines
   const paidToPatterns = [
-    /(?:paid\s+to|payment\s+to|transfer\s+to|sent\s+to)\s*[:-]?\s*([A-Za-z0-9&.,\- ]{2,35})/i,
-    /(?:to\s*[:-]|merchant\s*name\s*[:-]|biller\s*name\s*[:-])\s*([A-Za-z0-9&.,\- ]{2,35})/i,
-    /(?:delivered\s+from|order\s+from)\s*[:-]?\s*([A-Za-z0-9&.,\- ]{2,35})/i,
+    /(?:paid\s+to|payment\s+to|transfer\s+to|sent\s+to)\s*[:-]?\s*[\r\n\s]*([A-Za-z0-9&.,\- ]{2,35})/i,
+    /(?:from|received\s+from|sender)\s*[:-]?\s*[\r\n\s]*([A-Za-z0-9&.,\- ]{2,35})/i,
+    /(?:delivered\s+from|order\s+from)\s*[:-]?\s*[\r\n\s]*([A-Za-z0-9&.,\- ]{2,35})/i,
+    /(?:to\s*[:-]|merchant\s*name\s*[:-]|biller\s*name\s*[:-])\s*[\r\n\s]*([A-Za-z0-9&.,\- ]{2,35})/i,
   ];
 
   for (const regex of paidToPatterns) {
@@ -254,7 +290,7 @@ function extractMerchantDetails(text, lines) {
       if (!NOISE_WORDS.some((nw) => cleanCandidate.toLowerCase().includes(nw)) && cleanCandidate.length >= 3) {
         return {
           title: capitalizeWords(cleanCandidate),
-          category: 'other',
+          category: /cashback|refund/i.test(cleanCandidate) ? 'savings' : 'other',
           confidence: 'medium',
         };
       }
@@ -262,10 +298,10 @@ function extractMerchantDetails(text, lines) {
   }
 
   // Strategy 3: UPI VPA handle extraction (e.g., "chaipoint@icici", "amazonpaygrocery@ybl")
-  const vpaMatch = text.match(/([a-zA-Z0-9._-]{3,30})@(okaxis|okhdfcbank|okicici|oksbi|paytm|ybl|ibl|upi|axisbank|icici|hdfcbank)/i);
+  const vpaMatch = text.match(/([a-zA-Z0-9._-]{3,30})@(okaxis|okhdfcbank|okicici|oksbi|paytm|pthdfc|ybl|ibl|upi|axisbank|icici|hdfcbank)/i);
   if (vpaMatch && vpaMatch[1]) {
     const vpaPrefix = vpaMatch[1].replace(/[0-9._-]/g, ' ').trim();
-    if (vpaPrefix.length >= 3) {
+    if (vpaPrefix.length >= 3 && !NOISE_WORDS.some((nw) => vpaPrefix.toLowerCase().includes(nw))) {
       return {
         title: capitalizeWords(vpaPrefix),
         category: 'other',
@@ -276,15 +312,16 @@ function extractMerchantDetails(text, lines) {
 
   // Strategy 4: Physical receipt header (first meaningful lines)
   for (let i = 0; i < Math.min(6, lines.length); i++) {
-    const line = lines[i];
-    const isNoise = NOISE_WORDS.some((nw) => line.toLowerCase().includes(nw));
-    const hasOnlyDigits = /^[\d\s\-_.,#:]+$/.test(line);
-    const isDate = /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}/.test(line);
-    const isStatusBar = /\b(?:am|pm|kb\/s|mb\/s|%)\b/i.test(line);
+    // Strip leading arrows, punctuation, or status bar icons
+    const rawLine = lines[i].replace(/^[←→\-_#*|~]+\s*/, '').trim();
+    const isNoise = NOISE_WORDS.some((nw) => rawLine.toLowerCase().includes(nw));
+    const hasOnlyDigits = /^[\d\s\-_.,#:]+$/.test(rawLine);
+    const isDate = /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}/.test(rawLine);
+    const isStatusBar = /\b(?:am|pm|kb\/s|mb\/s|%)\b/i.test(rawLine);
 
-    if (!isNoise && !hasOnlyDigits && !isDate && !isStatusBar && line.length >= 3 && line.length <= 40) {
+    if (!isNoise && !hasOnlyDigits && !isDate && !isStatusBar && rawLine.length >= 3 && rawLine.length <= 40) {
       return {
-        title: capitalizeWords(line),
+        title: capitalizeWords(rawLine),
         category: 'other',
         confidence: 'low',
       };
@@ -303,7 +340,7 @@ function extractMerchantDetails(text, lines) {
  * Extract transaction reference (UTR or A/C)
  */
 function extractReferenceDetails(text) {
-  const utrMatch = text.match(/(?:utr|ref(?:\s*no)?|txn(?:\s*id)?)\s*[:-]?\s*([0-9A-Za-z]{8,22})/i);
+  const utrMatch = text.match(/(?:utr|ref(?:\s*no)?|txn(?:\s*id)?|upi\s*ref(?:\s*no)?)\s*[:-]?\s*([0-9A-Za-z]{8,22})/i);
   const acctMatch = text.match(/(?:a\/c|account|card)\s*(?:ending\s*)?([X\d]{4,16})/i);
 
   const parts = [];
@@ -323,10 +360,6 @@ function capitalizeWords(str) {
 
 /**
  * Automatically crops the transaction card region from tall mobile screenshots.
- * Modern smartphone screens have a 19:9 or 20:9 aspect ratio (~1080x2400).
- * In PhonePe, Google Pay, and Paytm, the actual payment details (merchant, amount, UTR)
- * occupy only the top 8% to 65% of the screen.
- * Cropping this region zooms in on the digits by 2.5x, drastically improving OCR accuracy.
  */
 async function getOptimalScanTarget(imageFile) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -353,7 +386,6 @@ async function getOptimalScanTarget(imageFile) {
     const cropHeight = Math.round(img.height * 0.60);
 
     const canvas = document.createElement('canvas');
-    // Upscale by 1.5x for crisp character rendering
     const scale = 1.5;
     canvas.width = Math.round(img.width * scale);
     canvas.height = Math.round(cropHeight * scale);
@@ -377,7 +409,6 @@ async function getOptimalScanTarget(imageFile) {
       }
       const avgBrightness = totalBrightness / count;
 
-      // Dark mode screenshot detected (black background): Invert to white paper with dark text
       if (avgBrightness < 125) {
         for (let i = 0; i < data.length; i += 4) {
           const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
@@ -405,7 +436,6 @@ async function getOptimalScanTarget(imageFile) {
 /**
  * Strict Receipt & Payment Verification:
  * Validates whether the scanned image contains authentic financial receipt or payment signals.
- * Disqualifies code dumps, terminal logs, casual screenshots, and memes so random numbers are NEVER auto-filled!
  */
 export function isFinancialReceiptOrPayment(rawText) {
   if (!rawText || rawText.trim().length < 5) return false;
@@ -425,7 +455,7 @@ export function isFinancialReceiptOrPayment(rawText) {
   let score = 0;
 
   // Factor A: Explicit transaction / invoice action (+2 points)
-  if (/\b(?:transaction\s+successful|payment\s+successful|payment\s+completed|paid\s+to|transfer\s+details|debited\s+from|transferred\s+to|tax\s+invoice|cash\s+memo|bill\s+of\s+supply|retail\s+invoice)\b/i.test(rawText)) {
+  if (/\b(?:transaction\s+successful|payment\s+successful|payment\s+completed|paid\s+to|transfer\s+details|debited\s+from|transferred\s+to|tax\s+invoice|cash\s+memo|bill\s+of\s+supply|retail\s+invoice|cashback\s+received|cashback|refund\s+received)\b/i.test(rawText)) {
     score += 2;
   }
 
@@ -449,15 +479,32 @@ export function isFinancialReceiptOrPayment(rawText) {
     score += 1;
   }
 
-  // Require at least 2 strong points to be considered a genuine receipt/payment screenshot
+  // Factor F: Amount in Words (+1 point)
+  if (/rupees?\s+[a-z\s\-]+?\s+(?:only|paise)/i.test(rawText)) {
+    score += 1;
+  }
+
   return score >= 2;
 }
 
 /**
- * Master OCR Image Scanner
+ * Master OCR Image Scanner:
+ * Uses Gemini 2.0 Flash Vision if an API key is available; otherwise uses high-precision local Tesseract.js.
  */
 export async function scanReceiptImage(imageFile, onProgress) {
   try {
+    // 1. Try Gemini 2.0 Flash Vision first if available
+    try {
+      const aiResult = await scanReceiptWithGemini(imageFile);
+      if (aiResult) {
+        if (onProgress) onProgress(100);
+        return aiResult;
+      }
+    } catch (aiErr) {
+      console.warn('[MoneyMap OCR] Gemini Vision bypassed, continuing with local engine:', aiErr);
+    }
+
+    // 2. Local Tesseract.js OCR engine
     const target = await getOptimalScanTarget(imageFile);
     const result = await Tesseract.recognize(target, 'eng', {
       logger: (m) => {
@@ -492,10 +539,10 @@ export async function scanReceiptImage(imageFile, onProgress) {
       };
     }
 
-    // 1. Extract Amount using smart cleaner
+    // 2. Extract Amount using smart cleaner
     let amount = extractSmartAmount(rawText);
 
-    // 2. If not found and target was cropped, fallback scan on full image
+    // 3. Fallback scan on full image if cropped target missed amount
     if (amount === null && target !== imageFile) {
       try {
         const fullRes = await Tesseract.recognize(imageFile, 'eng');
@@ -507,10 +554,10 @@ export async function scanReceiptImage(imageFile, onProgress) {
       }
     }
 
-    // 3. Extract Merchant / WHERE money was spent
+    // 4. Extract Merchant / WHERE money was spent or WHO sent it
     const merchantInfo = extractMerchantDetails(rawText, lines);
 
-    // 4. Fallback category classification
+    // 5. Fallback category classification
     let category = merchantInfo.category;
     if (category === 'other') {
       const smsParsed = parseExpenseText(rawText);
@@ -518,15 +565,16 @@ export async function scanReceiptImage(imageFile, onProgress) {
       else if (/food|biryani|pizza|burger|snack|curry|meal|lunch|dinner/i.test(rawText)) category = 'food-delivery';
       else if (/grocery|store|mart|supermarket/i.test(rawText)) category = 'groceries';
       else if (/fuel|petrol|diesel|ride|cab|auto|fare/i.test(rawText)) category = 'transport';
+      else if (/cashback|reward|saving/i.test(rawText)) category = 'savings';
       else category = 'groceries';
     }
 
-    // 5. Payment Method & UTR trace
+    // 6. Payment Method & UTR trace
     const isUpi = /utr|upi|bhim|gpay|phonepe|paytm|vpa|google\s*pay/i.test(rawText);
     const isCard = /card|ending\s*\d|pos/i.test(rawText);
     const paymentMethod = isUpi ? 'upi' : isCard ? 'card' : 'upi';
 
-    // 6. Reference (UTR / Account)
+    // 7. Reference (UTR / Account)
     const reference = extractReferenceDetails(rawText);
 
     return {

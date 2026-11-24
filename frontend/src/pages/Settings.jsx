@@ -12,7 +12,20 @@ export default function Settings() {
   });
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [geminiKey, setGeminiKey] = useState(() => {
+    return (typeof window !== 'undefined' && localStorage.getItem('gemini_api_key')) || '';
+  });
   const fileInputRef = useRef(null);
+
+  const handleSaveGeminiKey = () => {
+    if (geminiKey.trim()) {
+      localStorage.setItem('gemini_api_key', geminiKey.trim());
+      toast.success('Gemini AI Vision activated for receipt scanning! ✨');
+    } else {
+      localStorage.removeItem('gemini_api_key');
+      toast.success('Gemini key cleared. Using local OCR scanner.');
+    }
+  };
 
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
@@ -177,6 +190,60 @@ export default function Settings() {
             )}
           </button>
         </form>
+      </div>
+
+      {/* AI Receipt & Vision Scanner Settings */}
+      <div className="card border border-primary/20 bg-gradient-to-br from-white to-primary/5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">✨</span>
+            <h2 className="text-base font-semibold text-gray-900">AI Receipt Scanner (Google Gemini Vision)</h2>
+          </div>
+          <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${geminiKey ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600'}`}>
+            {geminiKey ? 'AI Vision Active ✨' : 'Using Local OCR'}
+          </span>
+        </div>
+        <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+          By default, MoneyMap uses its built-in offline OCR engine. For 100% human-level accuracy across tricky mobile screenshots (Paytm/PhonePe cashbacks, masked UPI IDs, handwritten bills), you can add a free Google Gemini 2.0 Flash API key.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="label text-xs">Google Gemini API Key (Optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                className="input-field text-sm font-mono"
+                placeholder="AIzaSy..."
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleSaveGeminiKey}
+                className="btn-primary text-sm whitespace-nowrap"
+              >
+                Save Key
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+            <span>Get a free key in 30 seconds at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">Google AI Studio →</a></span>
+            {geminiKey && (
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem('gemini_api_key');
+                  setGeminiKey('');
+                  toast.success('Gemini key removed. Using local OCR scanner.');
+                }}
+                className="text-red-500 hover:underline"
+              >
+                Remove Key
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Cloud Stack Info */}

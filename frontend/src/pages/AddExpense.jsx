@@ -405,7 +405,9 @@ export default function AddExpense() {
         <div>
           <label className="label flex items-center justify-between">
             <span>Receipt Photo or Payment Screenshot (Auto-Detects Amount)</span>
-            <span className="text-xs text-blue-600 font-normal">AI OCR Scanner Active</span>
+            <span className={`text-xs font-medium ${ocrDetected?.isAiVision ? 'text-primary' : 'text-blue-600'}`}>
+              {ocrDetected?.isAiVision ? '✨ Gemini AI Vision Active' : 'AI OCR Scanner Active'}
+            </span>
           </label>
           <input
             type="file"
@@ -462,7 +464,7 @@ export default function AddExpense() {
                   </span>
                 ) : ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
                   <span className="text-emerald-700 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md">
-                    ✓ Amount auto-filled: {currency}{sanitizeAmount(ocrDetected.amount)}
+                    {ocrDetected.isAiVision ? '✨ Gemini AI: ' : '✓ '}Amount auto-filled: {currency}{sanitizeAmount(ocrDetected.amount)}
                   </span>
                 ) : ocrDetected && ocrDetected.title ? (
                   <span className="text-blue-700 font-semibold flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md">
