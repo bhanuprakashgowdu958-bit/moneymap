@@ -4,11 +4,12 @@ import { uploadToCloudinary } from '../lib/cloudinary';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
-  const { user, profile, displayName, monthlyIncome, currency, photoURL, updateUserProfile, logout } = useAuth();
+  const { user, profile, displayName, monthlyIncome, currency, photoURL, phoneNumber, updateUserProfile, logout } = useAuth();
   const [form, setForm] = useState({
     name: displayName || '',
     monthlyIncome: monthlyIncome || '',
     currency: currency || '₹',
+    phoneNumber: phoneNumber || profile?.phoneNumber || '',
   });
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -57,6 +58,7 @@ export default function Settings() {
         name: form.name.trim(),
         monthlyIncome: Number(form.monthlyIncome) || 0,
         currency: form.currency,
+        phoneNumber: form.phoneNumber.trim(),
       });
       toast.success('Profile updated successfully! ✅');
     } catch (err) {
@@ -140,6 +142,16 @@ export default function Settings() {
               className="input-field bg-gray-100 text-gray-500 cursor-not-allowed"
               value={user?.email || ''}
               readOnly
+            />
+          </div>
+          <div>
+            <label className="label">Mobile Phone Number</label>
+            <input
+              type="tel"
+              className="input-field"
+              placeholder="+91 98765 43210"
+              value={form.phoneNumber}
+              onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
             />
           </div>
 

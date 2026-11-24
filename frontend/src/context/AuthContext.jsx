@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   /** Register */
-  const register = async (name, email, password, monthlyIncome = 0) => {
+  const register = async (name, email, password, monthlyIncome = 0, phoneNumber = '') => {
     if (isFirebaseConfigured && auth) {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(cred.user, { displayName: name });
@@ -70,6 +70,7 @@ export function AuthProvider({ children }) {
         currency: '₹',
         monthlyIncome: Number(monthlyIncome) || 0,
         photoURL: '',
+        phoneNumber: phoneNumber || '',
         createdAt: new Date().toISOString(),
       };
       await upsertUserProfile(cred.user.uid, profileData);
@@ -78,8 +79,8 @@ export function AuthProvider({ children }) {
     }
 
     // Demo Mode Registration
-    const demoUser = { uid: `local-${Date.now()}`, displayName: name, email, photoURL: '' };
-    const demoProfile = { name, email, currency: '₹', monthlyIncome: Number(monthlyIncome) || 0, photoURL: '' };
+    const demoUser = { uid: `local-${Date.now()}`, displayName: name, email, photoURL: '', phoneNumber: phoneNumber || '' };
+    const demoProfile = { name, email, currency: '₹', monthlyIncome: Number(monthlyIncome) || 0, photoURL: '', phoneNumber: phoneNumber || '' };
     localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: demoUser, profile: demoProfile }));
     setUser(demoUser);
     setProfile(demoProfile);
@@ -96,39 +97,52 @@ export function AuthProvider({ children }) {
     }
 
     // Demo Mode Login
-    const demoUser = { uid: 'demo-user-123', displayName: email.split('@')[0], email, photoURL: '' };
-    const demoProfile = { name: email.split('@')[0], email, currency: '₹', monthlyIncome: 65000, photoURL: '' };
+    const demoUser = { uid: 'demo-user-123', displayName: email.split('@')[0], email, photoURL: '', phoneNumber: '9876543210' };
+    const demoProfile = { name: email.split('@')[0], email, currency: '₹', monthlyIncome: 65000, photoURL: '', phoneNumber: '9876543210' };
     localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: demoUser, profile: demoProfile }));
     setUser(demoUser);
     setProfile(demoProfile);
     return demoUser;
   };
 
-  /** Google Sign-In */
-  const loginWithGoogle = async () => {
+  /** Google Sign-In with Mandatory Phone Number */
+  const loginWithGoogle = async (phoneNumber = '') => {
     if (isFirebaseConfigured && auth && googleProvider) {
       const cred = await signInWithPopup(auth, googleProvider);
       const existing = await getUserProfile(cred.user.uid);
+      const profileData = {
+        name: cred.user.displayName || existing?.name || 'User',
+        email: cred.user.email,
+        currency: existing?.currency || '₹',
+        monthlyIncome: existing?.monthlyIncome || 0,
+        photoURL: cred.user.photoURL || existing?.photoURL || '',
+        phoneNumber: phoneNumber || existing?.phoneNumber || '',
+        updatedAt: new Date().toISOString(),
+      };
       if (!existing) {
-        const profileData = {
-          name: cred.user.displayName || 'User',
-          email: cred.user.email,
-          currency: '₹',
-          monthlyIncome: 0,
-          photoURL: cred.user.photoURL || '',
-          createdAt: new Date().toISOString(),
-        };
-        await upsertUserProfile(cred.user.uid, profileData);
-        setProfile(profileData);
-      } else {
-        setProfile(existing);
+        profileData.createdAt = new Date().toISOString();
       }
+      await upsertUserProfile(cred.user.uid, profileData);
+      setProfile(profileData);
       return cred.user;
     }
 
-    // Demo Google Sign-In
-    const googleDemo = { uid: 'google-demo-uid', displayName: 'Google Explorer', email: 'explorer@gmail.com', photoURL: '' };
-    const googleProfile = { name: 'Google Explorer', email: 'explorer@gmail.com', currency: '₹', monthlyIncome: 70000, photoURL: '' };
+    // Demo Google Sign-In with Phone Number
+    const googleDemo = {
+      uid: 'google-demo-uid',
+      displayName: 'Google Explorer',
+      email: 'explorer@gmail.com',
+      photoURL: '',
+      phoneNumber: phoneNumber || '+91 98765 43210',
+    };
+    const googleProfile = {
+      name: 'Google Explorer',
+      email: 'explorer@gmail.com',
+      currency: '₹',
+      monthlyIncome: 70000,
+      photoURL: '',
+      phoneNumber: phoneNumber || '+91 98765 43210',
+    };
     localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: googleDemo, profile: googleProfile }));
     setUser(googleDemo);
     setProfile(googleProfile);
@@ -137,7 +151,7 @@ export function AuthProvider({ children }) {
 
   /** Instant 1-Click Demo Explore */
   const loginDemo = () => {
-    const demoProf = { name: 'Rahul Sharma', email: 'rahul@example.com', currency: '₹', monthlyIncome: 65000, photoURL: '' };
+    const demoProf = { name: 'Rahul Sharma', email: 'rahul@example.com', currency: '₹', monthlyIncome: 65000, photoURL: '', phoneNumber: '+91 98765 43210' };
     localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: DEMO_USER, profile: demoProf }));
     setUser(DEMO_USER);
     setProfile(demoProf);
@@ -183,6 +197,7 @@ export function AuthProvider({ children }) {
     currency:    profile?.currency || '₹',
     monthlyIncome: profile?.monthlyIncome ?? 0,
     photoURL:    profile?.photoURL || user?.photoURL || '',
+    phoneNumber: profile?.phoneNumber || user?.phoneNumber || '',
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
