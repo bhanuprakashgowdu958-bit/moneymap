@@ -1,11 +1,18 @@
 // Firebase configuration and initialization
-// Replace values in your .env file with your actual Firebase project credentials
-
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyC33XfyhiwYLeSEE5ERPhmBhtTxm_scSkg';
+
+const firebaseConfig = {
+  apiKey:            apiKey,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'moneymap-5c848.firebaseapp.com',
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID || 'moneymap-5c848',
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'moneymap-5c848.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1020623021434',
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID || '1:1020623021434:web:8c46f227f5563607bda2c3',
+};
 
 export const isFirebaseConfigured = Boolean(
   apiKey &&
@@ -13,30 +20,19 @@ export const isFirebaseConfigured = Boolean(
   !apiKey.includes('your_')
 );
 
-const firebaseConfig = {
-  apiKey:            apiKey || 'demo-api-key',
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'demo-project.firebaseapp.com',
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID || 'demo-project',
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'demo-project.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '123456789',
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID || '1:123456789:web:abcdef',
-};
-
 let app = null;
 let auth = null;
 let googleProvider = null;
 let db = null;
 
-if (isFirebaseConfigured) {
-  try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    googleProvider = new GoogleAuthProvider();
-    googleProvider.setCustomParameters({ prompt: 'select_account' });
-    db = getFirestore(app);
-  } catch (err) {
-    console.warn('Firebase initialization warning:', err);
-  }
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+  googleProvider.setCustomParameters({ prompt: 'select_account' });
+  db = getFirestore(app);
+} catch (err) {
+  console.warn('Firebase initialization notice:', err);
 }
 
 export { app, auth, googleProvider, db };

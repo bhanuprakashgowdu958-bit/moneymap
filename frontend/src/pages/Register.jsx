@@ -40,7 +40,15 @@ export default function Register() {
       }
       navigate('/dashboard');
     } catch (err) {
-      toast.error(err.message || 'Google sign-up failed');
+      if (err.code === 'auth/unauthorized-domain') {
+        toast.error('⚠️ Domain not authorized in Firebase! Please add moneymap-pl9w.vercel.app in Firebase Console -> Authentication -> Settings -> Authorized domains.', {
+          duration: 8000,
+        });
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        toast('Google sign-up popup closed', { icon: 'ℹ️' });
+      } else {
+        toast.error(err.message || 'Google sign-up failed');
+      }
     } finally {
       setGoogleLoading(false);
     }

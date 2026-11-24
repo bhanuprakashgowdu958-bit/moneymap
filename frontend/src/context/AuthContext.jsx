@@ -189,51 +189,37 @@ export function AuthProvider({ children }) {
    * Strictly checks if an account already exists. If not, signs out and throws NO_ACCOUNT_FOUND.
    */
   const signInWithGoogleLogin = async () => {
-    if (isFirebaseConfigured && auth && googleProvider) {
-      const cred = await signInWithPopup(auth, googleProvider);
-      const additionalInfo = getAdditionalUserInfo(cred);
-
-      let existing = null;
-      try {
-        existing = await getUserProfile(cred.user.uid);
-      } catch (err) {
-        console.warn('Profile fetch notice:', err);
-      }
-
-      const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
-      const isRegisteredFirestore = Boolean(existing && existing.phoneNumber);
-
-      // If Firebase says brand new account OR account has never registered with phone number:
-      if (additionalInfo?.isNewUser || (!isRegisteredLocal && !isRegisteredFirestore)) {
-        await signOut(auth);
-        setUser(null);
-        setProfile(null);
-        const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
-        err.code = 'NO_ACCOUNT_FOUND';
-        err.email = cred.user.email;
-        throw err;
-      }
-
-      setUser(cred.user);
-      setProfile(existing || { name: cred.user.displayName, email: cred.user.email });
-      return { user: cred.user, profile: existing };
+    if (!auth || !googleProvider) {
+      throw new Error('Google Authentication service is not initialized');
     }
 
-    // Demo Mode Google Login Check
-    const isDemoRegistered = isAccountRegistered('explorer@gmail.com', 'google-demo-uid') || Boolean(localStorage.getItem('moneymap_demo_registered'));
-    if (!isDemoRegistered) {
+    const cred = await signInWithPopup(auth, googleProvider);
+    const additionalInfo = getAdditionalUserInfo(cred);
+
+    let existing = null;
+    try {
+      existing = await getUserProfile(cred.user.uid);
+    } catch (err) {
+      console.warn('Profile fetch notice:', err);
+    }
+
+    const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
+    const isRegisteredFirestore = Boolean(existing && existing.phoneNumber);
+
+    // If Firebase says brand new account OR account has never registered with phone number:
+    if (additionalInfo?.isNewUser || (!isRegisteredLocal && !isRegisteredFirestore)) {
+      await signOut(auth);
+      setUser(null);
+      setProfile(null);
       const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
       err.code = 'NO_ACCOUNT_FOUND';
+      err.email = cred.user.email;
       throw err;
     }
 
-    const savedDemo = localStorage.getItem('moneymap_demo_session');
-    const demoData = savedDemo ? JSON.parse(savedDemo) : null;
-    const user = demoData?.user || { uid: 'google-demo-uid', displayName: 'Google Explorer', email: 'explorer@gmail.com', photoURL: '' };
-    const profile = demoData?.profile || { name: 'Google Explorer', email: 'explorer@gmail.com', currency: '₹', monthlyIncome: 70000, phoneNumber: '+91 98765 43210' };
-    setUser(user);
-    setProfile(profile);
-    return { user, profile };
+    setUser(cred.user);
+    setProfile(existing || { name: cred.user.displayName, email: cred.user.email });
+    return { user: cred.user, profile: existing };
   };
 
   /**
@@ -241,72 +227,46 @@ export function AuthProvider({ children }) {
    * Mandatory Phone Number is saved to their profile and marked registered
    */
   const signUpWithGoogleRegister = async (phoneNumber = '') => {
-    if (isFirebaseConfigured && auth && googleProvider) {
-      const cred = await signInWithPopup(auth, googleProvider);
-      let existing = null;
-      try {
-        existing = await getUserProfile(cred.user.uid);
-      } catch (err) {
-        console.warn('Profile fetch notice:', err);
-      }
-
-      const profileData = {
-        name: cred.user.displayName || existing?.name || 'User',
-        email: cred.user.email,
-        currency: existing?.currency || '₹',
-        monthlyIncome: existing?.monthlyIncome || 0,
-        photoURL: cred.user.photoURL || existing?.photoURL || '',
-        phoneNumber: phoneNumber || existing?.phoneNumber || '',
-        createdAt: existing?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        await upsertUserProfile(cred.user.uid, profileData);
-      } catch (err) {
-        console.warn('Firestore profile save notice:', err);
-      }
-
-      // Mark account as officially registered!
-      markAccountRegistered({
-        email: cred.user.email,
-        uid: cred.user.uid,
-        phoneNumber,
-        name: profileData.name,
-      });
-
-      setUser(cred.user);
-      setProfile(profileData);
-      return { user: cred.user, profile: profileData, isNew: !existing };
+    if (!auth || !googleProvider) {
+      throw new Error('Google Authentication service is not initialized');
     }
 
-    // Demo Mode Google Registration
-    const demoUser = {
-      uid: 'google-demo-uid',
-      displayName: 'Google Explorer',
-      email: 'explorer@gmail.com',
-      photoURL: '',
-      phoneNumber,
+    const cred = await signInWithPopup(auth, googleProvider);
+    let existing = null;
+    try {
+      existing = await getUserProfile(cred.user.uid);
+    } catch (err) {
+      console.warn('Profile fetch notice:', err);
+    }
+
+    const profileData = {
+      name: cred.user.displayName || existing?.name || 'User',
+      email: cred.user.email,
+      currency: existing?.currency || '₹',
+      monthlyIncome: existing?.monthlyIncome || 0,
+      photoURL: cred.user.photoURL || existing?.photoURL || '',
+      phoneNumber: phoneNumber || existing?.phoneNumber || '',
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    const demoProfile = {
-      name: 'Google Explorer',
-      email: 'explorer@gmail.com',
-      currency: '₹',
-      monthlyIncome: 70000,
-      photoURL: '',
-      phoneNumber,
-    };
-    localStorage.setItem('moneymap_demo_registered', 'true');
+
+    try {
+      await upsertUserProfile(cred.user.uid, profileData);
+    } catch (err) {
+      console.warn('Firestore profile save notice:', err);
+    }
+
+    // Mark account as officially registered!
     markAccountRegistered({
-      email: 'explorer@gmail.com',
-      uid: 'google-demo-uid',
+      email: cred.user.email,
+      uid: cred.user.uid,
       phoneNumber,
-      name: 'Google Explorer',
+      name: profileData.name,
     });
-    localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: demoUser, profile: demoProfile }));
-    setUser(demoUser);
-    setProfile(demoProfile);
-    return { user: demoUser, profile: demoProfile, isNew: true };
+
+    setUser(cred.user);
+    setProfile(profileData);
+    return { user: cred.user, profile: profileData, isNew: !existing };
   };
 
   /** Legacy / alias for loginWithGoogle */
