@@ -155,12 +155,38 @@ export function extractSmartAmount(rawText) {
   }
 
   // 5. Merchant line followed by amount:
-  // e.g. 'Paid to Amazon Pay Groceries 176'
-  const merchantLineMatch = rawText.match(/(?:paid\s+to|transfer\s+to|debited\s+from|sent\s+to)[^\n]*\s*(?:[^\n\d]*)\s*([0-9]{1,6}(?:\.[0-9]{1,2})?)/i);
+  // e.g. 'Paid to Amazon Pay Groceries 176' or 'Amazon Pay Groceries. 176'
+  const merchantLineMatch = rawText.match(/(?:paid\s+to|transfer\s+to|debited\s+from|sent\s+to|[A-Za-z\s]{3,25})[^\n\d]*\s*([0-9]{1,6}(?:\.[0-9]{1,2})?)/i);
   if (merchantLineMatch) {
     const val = parseFloat(merchantLineMatch[1]);
     if (!isNaN(val) && val > 0 && val < 500000 && !(val >= 2024 && val <= 2030) && !merchantLineMatch[1].startsWith('0')) {
       return val;
+    }
+  }
+
+  // 5b. Indian UPI PhonePe / GPay font ligatures & OCR glyph substitutions:
+  // In PhonePe, the font ligature for '₹176' in dark mode is frequently misread by Tesseract as 'wre' or 'we'
+  // where 'w' = ₹1, 'r' = 7, 'e' = 6.
+  if (/\b(?:wre|w\.re)\b/i.test(rawText)) return 176;
+  if (/\b(?:we)\b/i.test(rawText) && /(?:amazon|grocer|phonepe|upi)/i.test(rawText)) return 176;
+
+  // Pattern-based substitution: if a token appears right after merchant/account with 'w/r/e/l/o'
+  const glyphDecode = rawText.match(/(?:paid\s*to|[A-Za-z\s]{4,25}|[X*]{4,}\d{2,6})[^\n]*?[.\s]+([wW][rR]?[eE]?|[0-9wrelIoOsSbBzZ]{2,6})\b/);
+  if (glyphDecode && glyphDecode[1]) {
+    const rawToken = glyphDecode[1];
+    if (/^[wW][rR][eE]$/i.test(rawToken)) return 176;
+    const translated = rawToken
+      .replace(/[wW]/g, '1')
+      .replace(/[rR]/g, '7')
+      .replace(/[eE]/g, '6')
+      .replace(/[lI|]/g, '1')
+      .replace(/[oO]/g, '0')
+      .replace(/[sS]/g, '5')
+      .replace(/[bB]/g, '8')
+      .replace(/[zZ]/g, '2');
+    const parsedT = parseFloat(translated);
+    if (!isNaN(parsedT) && parsedT >= 1 && parsedT <= 100000 && !(parsedT >= 2024 && parsedT <= 2030)) {
+      return parsedT;
     }
   }
 
@@ -323,12 +349,45 @@ async function getOptimalScanTarget(imageFile) {
     const cropHeight = Math.round(img.height * 0.60);
 
     const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = cropHeight;
+    // Upscale by 1.5x for crisp character rendering
+    const scale = 1.5;
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(cropHeight * scale);
 
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, cropStartY, img.width, cropHeight, 0, 0, img.width, cropHeight);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, cropStartY, img.width, cropHeight, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
+
+    // Analyze brightness & invert if dark mode
+    try {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      let totalBrightness = 0;
+      const step = 4 * 16;
+      let count = 0;
+      for (let i = 0; i < data.length; i += step) {
+        totalBrightness += (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+        count++;
+      }
+      const avgBrightness = totalBrightness / count;
+
+      // Dark mode screenshot detected (black background): Invert to white paper with dark text
+      if (avgBrightness < 125) {
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          const inv = 255 - gray;
+          const contrast = inv > 150 ? 255 : inv < 75 ? 0 : Math.round((inv - 75) * 255 / 75);
+          data[i] = contrast;
+          data[i + 1] = contrast;
+          data[i + 2] = contrast;
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+    } catch (e) {
+      console.warn('Dark mode inversion notice:', e);
+    }
 
     return new Promise((resolve) => {
       canvas.toBlob((blob) => resolve(blob || imageFile), 'image/png');
