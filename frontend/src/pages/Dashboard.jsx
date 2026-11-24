@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { getMonthlyStats, getWeeklyData, getRecentExpenses, getBudgets } from '../lib/firestore';
+import { getExpenses, getBudgets } from '../lib/firestore';
 import { fetchGmailTransactions, importGmailTransactions } from '../lib/gmailSync';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
 import toast from 'react-hot-toast';
@@ -59,36 +59,73 @@ export default function Dashboard() {
     const prevYear  = month === 1 ? year - 1 : year;
 
     Promise.all([
-      getMonthlyStats(user.uid, month, year),
-      getMonthlyStats(user.uid, prevMonth, prevYear),
-      getWeeklyData(user.uid),
-      getRecentExpenses(user.uid, 5),
+      getExpenses(user.uid),
       getBudgets(user.uid, month, year),
     ])
-      .then(([cur, prev, wk, rec, bud]) => {
-        setStats(cur);
-        setLastMonth(prev.total);
+      .then(([allExpenses, bud]) => {
+        // Current month calculations
+        const curExpenses = allExpenses.filter((e) => {
+          const d = new Date(e.date);
+          return d.getMonth() + 1 === month && d.getFullYear() === year;
+        });
+        const curTotal = curExpenses.reduce((s, e) => s + e.amount, 0);
 
-        // Today total
-        const today = now.toDateString();
-        const todaySum = cur.expenses
-          .filter((e) => new Date(e.date).toDateString() === today)
+        const byCategory = {};
+        curExpenses.forEach((e) => {
+          if (!byCategory[e.category]) byCategory[e.category] = { total: 0, count: 0 };
+          byCategory[e.category].total += e.amount;
+          byCategory[e.category].count += 1;
+        });
+        const statsArr = Object.entries(byCategory)
+          .map(([cat, v]) => ({ _id: cat, ...v }))
+          .sort((a, b) => b.total - a.total);
+
+        setStats({ total: curTotal, stats: statsArr, expenses: curExpenses });
+
+        // Previous month calculation
+        const prevTotal = allExpenses
+          .filter((e) => {
+            const d = new Date(e.date);
+            return d.getMonth() + 1 === prevMonth && d.getFullYear() === prevYear;
+          })
+          .reduce((s, e) => s + e.amount, 0);
+        setLastMonth(prevTotal);
+
+        // Today's total
+        const todayStr = now.toDateString();
+        const todaySum = curExpenses
+          .filter((e) => new Date(e.date).toDateString() === todayStr)
           .reduce((s, e) => s + e.amount, 0);
         setTodayTotal(todaySum);
 
-        setWeekly(wk);
-        setRecent(rec);
+        // Weekly chart data (last 7 days)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const dayMap = {};
+        allExpenses.forEach((e) => {
+          const d = new Date(e.date);
+          if (d >= sevenDaysAgo) {
+            const key = d.toISOString().split('T')[0];
+            dayMap[key] = (dayMap[key] || 0) + e.amount;
+          }
+        });
+        setWeekly(Object.entries(dayMap).map(([_id, total]) => ({ _id, total })));
+
+        // Recent 5 expenses
+        setRecent(allExpenses.slice(0, 5));
 
         // Merge budgets with spending
         const spendMap = {};
-        cur.stats.forEach((s) => { spendMap[s._id] = s.total; });
+        statsArr.forEach((s) => { spendMap[s._id] = s.total; });
         setBudgets(bud.map((b) => ({
           ...b,
           spent: spendMap[b.category] || 0,
-          percentage: Math.round(((spendMap[b.category] || 0) / b.limit) * 100),
+          percentage: Math.round(((spendMap[b.category] || 0) / (b.limit || 1)) * 100),
         })));
       })
-      .catch(() => toast.error('Failed to load dashboard'))
+      .catch((err) => {
+        console.warn('Dashboard data load notice:', err);
+      })
       .finally(() => setLoading(false));
   }, [user]);
 

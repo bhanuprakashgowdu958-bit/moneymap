@@ -9,14 +9,15 @@ import {
   getAdditionalUserInfo,
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
-import { upsertUserProfile, getUserProfile } from '../lib/firestore';
+import { upsertUserProfile, getUserProfile, loadLocal, saveLocal } from '../lib/firestore';
 
 const AuthContext = createContext(null);
 
 const STORAGE_KEY_REGISTERED = 'moneymap_registered_accounts';
+const DEMO_STORAGE_KEY_USER   = 'moneymap_demo_user';
 
 /**
- * Checks whether an account was explicitly registered with phone number
+ * Checks whether an account was explicitly registered with phone number (instant 0ms)
  */
 export function isAccountRegistered(email, uid) {
   try {
@@ -32,7 +33,7 @@ export function isAccountRegistered(email, uid) {
 }
 
 /**
- * Marks an account as registered upon successful registration
+ * Marks an account as registered upon successful registration (instant 0ms)
  */
 export function markAccountRegistered(account) {
   try {
@@ -63,36 +64,48 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Initialize auth state
+  // Initialize auth state (instant non-blocking)
   useEffect(() => {
     if (isFirebaseConfigured && auth) {
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         if (firebaseUser) {
-          let p = null;
-          try {
-            p = await getUserProfile(firebaseUser.uid);
-          } catch {
-            p = null;
-          }
-
-          const isRegistered = isAccountRegistered(firebaseUser.email, firebaseUser.uid) || Boolean(p && p.phoneNumber);
+          const isRegistered = isAccountRegistered(firebaseUser.email, firebaseUser.uid);
+          const cachedLocal = loadLocal(DEMO_STORAGE_KEY_USER, null);
 
           // If session belongs to an unregistered user who never completed registration flow:
-          if (!isRegistered) {
-            await signOut(auth);
+          if (!isRegistered && (!cachedLocal || !cachedLocal.phoneNumber)) {
+            signOut(auth).catch(() => {});
             setUser(null);
             setProfile(null);
             setLoading(false);
             return;
           }
 
+          // 1. Immediately set user and instant profile (0ms!)
+          const instantProfile = cachedLocal || {
+            name: firebaseUser.displayName || 'User',
+            email: firebaseUser.email,
+            photoURL: firebaseUser.photoURL || '',
+            currency: '₹',
+            monthlyIncome: 0,
+            phoneNumber: cachedLocal?.phoneNumber || '',
+          };
+
           setUser(firebaseUser);
-          setProfile(p);
+          setProfile(instantProfile);
+          setLoading(false);
+
+          // 2. Fetch fresh Firestore updates in the background without blocking the UI
+          getUserProfile(firebaseUser.uid)
+            .then((fresh) => {
+              if (fresh) setProfile((prev) => ({ ...prev, ...fresh }));
+            })
+            .catch(() => {});
         } else {
           setUser(null);
           setProfile(null);
+          setLoading(false);
         }
-        setLoading(false);
       });
       return unsubscribe;
     } else {
@@ -101,14 +114,8 @@ export function AuthProvider({ children }) {
       if (savedDemo) {
         try {
           const parsed = JSON.parse(savedDemo);
-          const isRegistered = isAccountRegistered(parsed.user?.email, parsed.user?.uid) || Boolean(localStorage.getItem('moneymap_demo_registered'));
-          if (isRegistered) {
-            setUser(parsed.user);
-            setProfile(parsed.profile);
-          } else {
-            setUser(null);
-            setProfile(null);
-          }
+          setUser(parsed.user);
+          setProfile(parsed.profile);
         } catch {
           setUser(null);
         }
@@ -131,13 +138,13 @@ export function AuthProvider({ children }) {
         phoneNumber: phoneNumber || '',
         createdAt: new Date().toISOString(),
       };
-      await upsertUserProfile(cred.user.uid, profileData);
       markAccountRegistered({
         email,
         uid: cred.user.uid,
         phoneNumber,
         name,
       });
+      upsertUserProfile(cred.user.uid, profileData).catch(() => {});
       setUser(cred.user);
       setProfile(profileData);
       return cred.user;
@@ -163,14 +170,15 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     if (isFirebaseConfigured && auth) {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      let p = null;
-      try {
-        p = await getUserProfile(cred.user.uid);
-      } catch {
-        p = null;
-      }
+      const instantProfile = loadLocal(DEMO_STORAGE_KEY_USER, {
+        name: cred.user.displayName || email.split('@')[0],
+        email: cred.user.email,
+        currency: '₹',
+        monthlyIncome: 0,
+      });
       setUser(cred.user);
-      setProfile(p);
+      setProfile(instantProfile);
+      getUserProfile(cred.user.uid).then((p) => { if (p) setProfile(p); }).catch(() => {});
       return cred.user;
     }
 
@@ -186,7 +194,7 @@ export function AuthProvider({ children }) {
 
   /**
    * Google Sign-In for Existing Users (Login Page)
-   * Strictly checks if an account already exists. If not, signs out and throws NO_ACCOUNT_FOUND.
+   * Super fast: verifies registration in 0ms and navigates instantly
    */
   const signInWithGoogleLogin = async () => {
     if (!auth || !googleProvider) {
@@ -196,35 +204,48 @@ export function AuthProvider({ children }) {
     const cred = await signInWithPopup(auth, googleProvider);
     const additionalInfo = getAdditionalUserInfo(cred);
 
-    let existing = null;
-    try {
-      existing = await getUserProfile(cred.user.uid);
-    } catch (err) {
-      console.warn('Profile fetch notice:', err);
-    }
-
+    // Instant local check first (0ms)
     const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
-    const isRegisteredFirestore = Boolean(existing && existing.phoneNumber);
+    const cachedProfile = loadLocal(DEMO_STORAGE_KEY_USER, null);
+    const hasPhoneCached = Boolean(cachedProfile && cachedProfile.phoneNumber);
 
-    // If Firebase says brand new account OR account has never registered with phone number:
-    if (additionalInfo?.isNewUser || (!isRegisteredLocal && !isRegisteredFirestore)) {
-      await signOut(auth);
-      setUser(null);
-      setProfile(null);
-      const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
-      err.code = 'NO_ACCOUNT_FOUND';
-      err.email = cred.user.email;
-      throw err;
+    if (additionalInfo?.isNewUser || (!isRegisteredLocal && !hasPhoneCached)) {
+      // Check remote Firestore as last resort
+      const existing = await getUserProfile(cred.user.uid);
+      if (!existing || !existing.phoneNumber) {
+        await signOut(auth);
+        setUser(null);
+        setProfile(null);
+        const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
+        err.code = 'NO_ACCOUNT_FOUND';
+        err.email = cred.user.email;
+        throw err;
+      }
     }
+
+    const profileData = cachedProfile || {
+      name: cred.user.displayName || 'User',
+      email: cred.user.email,
+      photoURL: cred.user.photoURL || '',
+      currency: '₹',
+      monthlyIncome: 0,
+      phoneNumber: '',
+    };
 
     setUser(cred.user);
-    setProfile(existing || { name: cred.user.displayName, email: cred.user.email });
-    return { user: cred.user, profile: existing };
+    setProfile(profileData);
+
+    // Sync Firestore in background
+    getUserProfile(cred.user.uid).then((fresh) => {
+      if (fresh) setProfile((prev) => ({ ...prev, ...fresh }));
+    }).catch(() => {});
+
+    return { user: cred.user, profile: profileData };
   };
 
   /**
    * Google Sign-Up for New Users (Register Page)
-   * Mandatory Phone Number is saved to their profile and marked registered
+   * Instant registration: saves phone number and logs in immediately
    */
   const signUpWithGoogleRegister = async (phoneNumber = '') => {
     if (!auth || !googleProvider) {
@@ -232,41 +253,35 @@ export function AuthProvider({ children }) {
     }
 
     const cred = await signInWithPopup(auth, googleProvider);
-    let existing = null;
-    try {
-      existing = await getUserProfile(cred.user.uid);
-    } catch (err) {
-      console.warn('Profile fetch notice:', err);
-    }
 
     const profileData = {
-      name: cred.user.displayName || existing?.name || 'User',
+      name: cred.user.displayName || 'User',
       email: cred.user.email,
-      currency: existing?.currency || '₹',
-      monthlyIncome: existing?.monthlyIncome || 0,
-      photoURL: cred.user.photoURL || existing?.photoURL || '',
-      phoneNumber: phoneNumber || existing?.phoneNumber || '',
-      createdAt: existing?.createdAt || new Date().toISOString(),
+      currency: '₹',
+      monthlyIncome: 0,
+      photoURL: cred.user.photoURL || '',
+      phoneNumber: phoneNumber || '',
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await upsertUserProfile(cred.user.uid, profileData);
-    } catch (err) {
-      console.warn('Firestore profile save notice:', err);
-    }
-
-    // Mark account as officially registered!
+    // 1. Mark account registered and save local profile INSTANTLY (0ms!)
     markAccountRegistered({
       email: cred.user.email,
       uid: cred.user.uid,
       phoneNumber,
       name: profileData.name,
     });
+    saveLocal(DEMO_STORAGE_KEY_USER, { ...profileData, uid: cred.user.uid });
 
+    // 2. Set user immediately so UI unblocks instantly
     setUser(cred.user);
     setProfile(profileData);
-    return { user: cred.user, profile: profileData, isNew: !existing };
+
+    // 3. Save to Firestore in background without delaying user
+    upsertUserProfile(cred.user.uid, profileData).catch(() => {});
+
+    return { user: cred.user, profile: profileData, isNew: true };
   };
 
   /** Legacy / alias for loginWithGoogle */
@@ -300,15 +315,13 @@ export function AuthProvider({ children }) {
   /** Update Profile */
   const updateUserProfile = async (data) => {
     if (!user) return;
-    await upsertUserProfile(user.uid, data);
-    if (isFirebaseConfigured && auth?.currentUser) {
-      if (data.name) await updateProfile(auth.currentUser, { displayName: data.name });
-      if (data.photoURL) await updateProfile(auth.currentUser, { photoURL: data.photoURL });
-    }
     const updated = { ...profile, ...data };
     setProfile(updated);
-    if (!isFirebaseConfigured) {
-      localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: { ...user, displayName: data.name || user.displayName }, profile: updated }));
+    saveLocal(DEMO_STORAGE_KEY_USER, { ...updated, uid: user.uid });
+    upsertUserProfile(user.uid, data).catch(() => {});
+    if (isFirebaseConfigured && auth?.currentUser) {
+      if (data.name) updateProfile(auth.currentUser, { displayName: data.name }).catch(() => {});
+      if (data.photoURL) updateProfile(auth.currentUser, { photoURL: data.photoURL }).catch(() => {});
     }
   };
 
