@@ -78,9 +78,9 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
   };
 
   return (
-    <div className="card">
+    <div className="card p-4 sm:p-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-4">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
             <CalendarIcon className="w-5 h-5" />
@@ -127,20 +127,20 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
       </div>
 
       {/* 2-Column Body: Calendar Grid + Selected Day Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left: Month Calendar Grid */}
         <div className="lg:col-span-7">
           {/* Weekday Headers */}
-          <div className="grid grid-cols-7 gap-1.5 mb-2">
+          <div className="grid grid-cols-7 gap-1 mb-1.5">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-              <div key={d} className="text-center text-[11px] font-semibold text-gray-400 uppercase tracking-wider py-1">
+              <div key={d} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider py-0.5">
                 {d}
               </div>
             ))}
           </div>
 
           {/* Day Cells */}
-          <div className="grid grid-cols-7 gap-1.5">
+          <div className="grid grid-cols-7 gap-1">
             {calendarDays.map((day) => {
               const key = toDayKey(day);
               const inMonth = isSameMonth(day, currentMonth);
@@ -183,7 +183,7 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
                     setSelectedDate(day);
                     if (!inMonth) setCurrentMonth(startOfMonth(day));
                   }}
-                  className={`relative h-14 sm:h-16 rounded-xl border p-1.5 flex flex-col items-center justify-between transition-all ${cellBg}`}
+                  className={`relative h-11 sm:h-12 rounded-lg border p-1 flex flex-col items-center justify-between transition-all ${cellBg}`}
                 >
                   <div className="w-full flex items-center justify-between px-0.5">
                     <span
@@ -260,7 +260,7 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
           </div>
 
           {/* Expense List for Selected Day */}
-          <div className="flex-1 py-3 space-y-2.5 max-h-[290px] overflow-y-auto">
+          <div className="flex-1 py-2.5 space-y-2 max-h-[210px] overflow-y-auto">
             {selectedData.items.length > 0 ? (
               selectedData.items.map((e) => {
                 const cat = CATEGORIES[e.category] || CATEGORIES.other;

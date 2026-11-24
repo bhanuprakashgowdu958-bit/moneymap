@@ -180,6 +180,9 @@ export default function Dashboard() {
         <StatCard icon="📅" label="Last Month" value={formatCurrency(lastMonth, currency)} sub="Previous period" bgColor="bg-purple-50" />
       </div>
 
+      {/* Interactive Spending Calendar */}
+      <SpendingCalendar expenses={allExpenses} currency={currency} />
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="card lg:col-span-2">
@@ -297,9 +300,6 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-
-      {/* Interactive Spending Calendar */}
-      <SpendingCalendar expenses={allExpenses} currency={currency} />
 
       {stats.total > 0 && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">
