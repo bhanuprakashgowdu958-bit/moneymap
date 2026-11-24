@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { getOrCreateWebhookToken, regenerateWebhookToken, isDemoUser } from '../lib/firestore';
-import { downloadMacroDroidGuidePdf } from '../lib/macrodroidPdf';
+import { downloadMacroDroidGuidePdf, downloadIosGuidePdf } from '../lib/macrodroidPdf';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -405,13 +405,18 @@ export default function Settings() {
                   type="button"
                   disabled={!webhookUrl}
                   onClick={() => {
-                    downloadMacroDroidGuidePdf(webhookUrl, displayName || 'User');
-                    toast.success('MacroDroid Setup Guide PDF downloaded! 📄');
+                    if (guideTab === 'ios') {
+                      downloadIosGuidePdf(webhookUrl, displayName || 'User');
+                      toast.success('iPhone Shortcuts Setup PDF downloaded! 📄');
+                    } else {
+                      downloadMacroDroidGuidePdf(webhookUrl, displayName || 'User');
+                      toast.success('MacroDroid Setup Guide PDF downloaded! 📄');
+                    }
                   }}
                   className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center gap-1.5 disabled:opacity-50"
-                  title="Download complete step-by-step MacroDroid PDF guide with your personal Webhook URL"
+                  title={`Download complete step-by-step ${guideTab === 'ios' ? 'iPhone Shortcuts' : 'Android MacroDroid'} PDF guide`}
                 >
-                  <span>📄</span> Download PDF Guide
+                  <span>📄</span> Download {guideTab === 'ios' ? 'iOS' : 'Android'} PDF
                 </button>
               </div>
 
