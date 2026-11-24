@@ -437,3 +437,66 @@ export async function deleteBudget(uid, budgetId) {
     }
   }
 }
+
+// ─────────────────────────────────────────
+//  PHONE SMS WEBHOOK TOKENS
+// ─────────────────────────────────────────
+
+function generateWebhookToken() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let rand = '';
+  for (let i = 0; i < 24; i++) {
+    rand += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `mm_${rand}`;
+}
+
+export async function getOrCreateWebhookToken(uid) {
+  if (!uid || isDemoUser(uid)) return null;
+
+  const profileKey = getUserProfileKey(uid);
+  const localProfile = loadLocal(profileKey, {});
+  if (localProfile.webhookToken) {
+    return localProfile.webhookToken;
+  }
+
+  const remoteProfile = await getUserProfile(uid);
+  if (remoteProfile?.webhookToken) {
+    saveLocal(profileKey, { ...localProfile, webhookToken: remoteProfile.webhookToken });
+    return remoteProfile.webhookToken;
+  }
+
+  return regenerateWebhookToken(uid, null);
+}
+
+export async function regenerateWebhookToken(uid, oldToken = null) {
+  if (!uid || isDemoUser(uid)) return null;
+
+  const newToken = generateWebhookToken();
+  const profileKey = getUserProfileKey(uid);
+  const localProfile = loadLocal(profileKey, {});
+  saveLocal(profileKey, { ...localProfile, webhookToken: newToken });
+
+  if (isFirebaseConfigured && db) {
+    try {
+      if (oldToken) {
+        await withTimeout(deleteDoc(doc(db, 'webhookTokens', oldToken)), 1200);
+      }
+      await withTimeout(
+        setDoc(doc(db, 'webhookTokens', newToken), {
+          uid,
+          createdAt: serverTimestamp(),
+        }),
+        1500
+      );
+      await withTimeout(
+        setDoc(doc(db, 'users', uid), { webhookToken: newToken, updatedAt: serverTimestamp() }, { merge: true }),
+        1500
+      );
+    } catch (err) {
+      console.warn('Firestore webhook token sync notice:', err.message);
+    }
+  }
+
+  return newToken;
+}

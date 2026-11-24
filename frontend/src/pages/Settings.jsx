@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
-import { isGmailSyncConnected, connectGmailSync, disconnectGmailSync } from '../lib/gmailSync';
+import { getOrCreateWebhookToken, regenerateWebhookToken, isDemoUser } from '../lib/firestore';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -17,28 +17,66 @@ export default function Settings() {
   const [geminiKey, setGeminiKey] = useState(() => {
     return (typeof window !== 'undefined' && localStorage.getItem('gemini_api_key')) || '';
   });
-  const [gmailConnected, setGmailConnected] = useState(() => isGmailSyncConnected());
-  const [connectingGmail, setConnectingGmail] = useState(false);
+  const [webhookToken, setWebhookToken] = useState('');
+  const [loadingWebhook, setLoadingWebhook] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [guideTab, setGuideTab] = useState('ios');
   const fileInputRef = useRef(null);
 
-  const handleToggleGmailSync = async () => {
-    if (gmailConnected) {
-      disconnectGmailSync();
-      setGmailConnected(false);
-      toast.success('Gmail Transaction Auto-Sync disconnected.');
-    } else {
-      setConnectingGmail(true);
-      try {
-        const res = await connectGmailSync();
-        if (res.success) {
-          setGmailConnected(true);
-          toast.success('Gmail Auto-Sync connected! Bank debit alerts will now be detected ⚡');
-        }
-      } catch (err) {
-        toast.error('Failed to connect Gmail');
-      } finally {
-        setConnectingGmail(false);
+  useEffect(() => {
+    if (user?.uid && !isDemoUser(user.uid)) {
+      getOrCreateWebhookToken(user.uid)
+        .then((tok) => { if (tok) setWebhookToken(tok); })
+        .catch(() => {});
+    }
+  }, [user]);
+
+  const webhookUrl = webhookToken
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook?token=${webhookToken}`
+    : '';
+
+  const handleCopyWebhook = () => {
+    if (!webhookUrl) return;
+    navigator.clipboard.writeText(webhookUrl);
+    toast.success('Personal Webhook URL copied! 📋');
+  };
+
+  const handleRegenerateWebhook = async () => {
+    if (!user?.uid || isDemoUser(user.uid)) return;
+    if (!window.confirm('Regenerate webhook URL? Your old phone shortcut URL will stop working.')) return;
+    setLoadingWebhook(true);
+    try {
+      const next = await regenerateWebhookToken(user.uid, webhookToken);
+      setWebhookToken(next);
+      toast.success('New Webhook URL generated! 🔄');
+    } catch {
+      toast.error('Failed to regenerate token');
+    } finally {
+      setLoadingWebhook(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    if (!webhookUrl) return;
+    setTestingWebhook(true);
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'INR 199.00 debited from A/C XX4921 to Swiggy via UPI Ref 433190821890',
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        toast.success(`Test logged: ${data.expense?.title} (${currency}${data.expense?.amount}) 🎉`);
+      } else {
+        toast.error(data?.error || 'Webhook test works once deployed to Vercel.');
       }
+    } catch {
+      toast.error('Webhook endpoint requires Vercel deployment (or vercel dev).');
+    } finally {
+      setTestingWebhook(false);
     }
   };
 
@@ -282,55 +320,108 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Gmail Bank Transaction Auto-Sync */}
-      <div className="card border border-amber-500/20 bg-gradient-to-br from-white to-amber-500/5">
+      {/* Real-Time Phone SMS / UPI Webhook */}
+      <div className="card border border-emerald-500/20 bg-gradient-to-br from-white to-emerald-500/5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-xl">⚡</span>
-            <h2 className="text-base font-semibold text-gray-900">Gmail Transaction Auto-Sync</h2>
+            <span className="text-xl">📱</span>
+            <h2 className="text-base font-semibold text-gray-900">Real-Time Phone SMS / UPI Auto-Sync</h2>
           </div>
-          <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${gmailConnected ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-600'}`}>
-            {gmailConnected ? 'Sync Active ⚡' : 'Not Connected'}
+          <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800 border border-emerald-300">
+            Zero-Burden Sync ⚡
           </span>
         </div>
         <p className="text-xs text-gray-600 mb-4 leading-relaxed">
-          Automatically scans incoming bank debit alert emails (HDFC, ICICI, SBI, Axis, Swiggy, Zomato, Uber, Blinkit) received on your Google account and captures expenses directly into MoneyMap without manual typing.
+          Automatically log every UPI, card, or bank debit the second you receive an SMS on your phone — no manual statement uploads or Google email warnings needed.
         </p>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white/80 rounded-xl border border-amber-200/50">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-lg">
-              ✉️
-            </div>
+        {isDemoUser(user?.uid) ? (
+          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+            Sign in with a real Google/Email account to generate your personal SMS Webhook URL.
+          </div>
+        ) : (
+          <div className="space-y-4">
             <div>
-              <p className="text-sm font-semibold text-gray-800">
-                {gmailConnected ? 'Bank Alert Scanner Enabled' : 'Connect Your Google Mailbox'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {gmailConnected ? 'Ready to sync debit alerts with 1-click from Dashboard' : 'Uses read-only permission for transactional receipts'}
-              </p>
+              <label className="label text-xs">Your Personal Webhook URL (Keep Secret)</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={webhookUrl || 'Generating...'}
+                  className="input-field text-xs font-mono bg-gray-50 text-gray-700"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyWebhook}
+                  disabled={!webhookUrl}
+                  className="btn-primary text-xs whitespace-nowrap px-3.5"
+                >
+                  📋 Copy
+                </button>
+              </div>
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <button
+                  type="button"
+                  onClick={handleTestWebhook}
+                  disabled={testingWebhook || !webhookUrl}
+                  className="text-emerald-700 hover:underline font-semibold"
+                >
+                  {testingWebhook ? 'Sending test...' : '⚡ Send Test SMS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegenerateWebhook}
+                  disabled={loadingWebhook}
+                  className="text-gray-500 hover:text-red-600"
+                >
+                  {loadingWebhook ? 'Regenerating...' : '🔄 Regenerate URL'}
+                </button>
+              </div>
+            </div>
+
+            {/* 60-Second Setup Guide Tabs */}
+            <div className="bg-white rounded-xl border border-gray-200 p-3.5">
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setGuideTab('ios')}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
+                    guideTab === 'ios' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                   iPhone (Shortcuts)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGuideTab('android')}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
+                    guideTab === 'android' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  🤖 Android (MacroDroid)
+                </button>
+              </div>
+
+              {guideTab === 'ios' ? (
+                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                  <li>Open the built-in <strong>Shortcuts</strong> app → <strong>Automation</strong> → <strong>+</strong>.</li>
+                  <li>Choose <strong>Message</strong> → Message Contains <code className="bg-gray-100 px-1 rounded">debited</code> → <strong>Run Immediately</strong>.</li>
+                  <li>Add action: <strong>Get Contents of URL</strong> → paste your Webhook URL above.</li>
+                  <li>Set Method to <strong>POST</strong>, Request Body to <strong>JSON</strong>, key <code className="bg-gray-100 px-1 rounded">text</code> = <strong>Shortcut Input</strong>.</li>
+                </ol>
+              ) : (
+                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                  <li>Install <strong>MacroDroid</strong> (or SMS Forwarder) from Play Store.</li>
+                  <li>Trigger: <strong>SMS Received</strong> (contains <code className="bg-gray-100 px-1 rounded">debited</code> or <code className="bg-gray-100 px-1 rounded">UPI</code>).</li>
+                  <li>Action: <strong>HTTP Request (POST)</strong> → paste your Webhook URL above.</li>
+                  <li>Content-Type <code className="bg-gray-100 px-1 rounded">application/json</code>, Body: <code className="bg-gray-100 px-1 rounded">{`{"text":"[sms_message]"}`}</code>.</li>
+                </ol>
+              )}
             </div>
           </div>
-          <button
-            type="button"
-            disabled={connectingGmail}
-            onClick={handleToggleGmailSync}
-            className={`text-sm py-2 px-4 rounded-xl font-medium transition-all flex items-center gap-2 ${
-              gmailConnected
-                ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
-                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
-            }`}
-          >
-            {connectingGmail ? (
-              <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></span> Connecting...</>
-            ) : gmailConnected ? (
-              'Disconnect Sync'
-            ) : (
-              '⚡ Connect Gmail Sync'
-            )}
-          </button>
-        </div>
+        )}
       </div>
+
       <div className="card">
         <h2 className="text-base font-semibold text-gray-900 mb-4">Infrastructure & Cloud Services</h2>
         <div className="space-y-3 text-sm text-gray-600">
