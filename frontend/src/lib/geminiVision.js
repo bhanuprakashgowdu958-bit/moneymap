@@ -58,39 +58,51 @@ Return ONLY a valid JSON object with NO markdown formatting, NO backticks, and N
   "reference": string
 }`;
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`;
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
+    // Try the fastest, most reliable multimodal models: gemini-3.5-flash-lite, then gemini-3.8-flash
+    const candidateModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+    let resData = null;
+
+    for (const model of candidateModels) {
+      try {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
               {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64Data,
-                },
-              },
-              {
-                text: prompt,
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: mimeType,
+                      data: base64Data,
+                    },
+                  },
+                  {
+                    text: prompt,
+                  },
+                ],
               },
             ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: 'application/json',
+            },
+          }),
+        });
 
-    if (!response.ok) {
-      console.warn('[MoneyMap Gemini Vision] API response error:', response.status, response.statusText);
-      return null;
+        if (response.ok) {
+          resData = await response.json();
+          if (resData?.candidates?.[0]?.content?.parts?.[0]?.text) break;
+        } else {
+          console.warn(`[MoneyMap Gemini Vision] ${model} returned ${response.status}`);
+        }
+      } catch (e) {
+        console.warn(`[MoneyMap Gemini Vision] ${model} fetch failed:`, e);
+      }
     }
 
-    const resData = await response.json();
+    if (!resData) return null;
     const candidate = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!candidate) return null;
 
