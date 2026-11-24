@@ -10,7 +10,7 @@ export default function Register() {
   const [loading, setLoading]         = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const phoneInputRef = useRef(null);
-  const { register, loginWithGoogle } = useAuth();
+  const { register, signUpWithGoogleRegister } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -34,8 +34,8 @@ export default function Register() {
   const handleGoogle = async () => {
     const cleaned = googlePhone.trim().replace(/\D/g, '');
     if (!cleaned) {
-      setPhoneError('Phone number is mandatory before signing in with Google');
-      toast.error('⚠️ Phone number is mandatory to sign in with Google! 📱', {
+      setPhoneError('Phone number is mandatory to create your account');
+      toast.error('⚠️ Phone number is mandatory to sign up with Google! 📱', {
         duration: 4000,
       });
       if (phoneInputRef.current) phoneInputRef.current.focus();
@@ -52,11 +52,15 @@ export default function Register() {
     setPhoneError('');
     setGoogleLoading(true);
     try {
-      await loginWithGoogle(`+91 ${cleaned}`);
-      toast.success('Welcome to MoneyMap! 🎉');
+      const res = await signUpWithGoogleRegister(`+91 ${cleaned}`);
+      if (res?.isNew) {
+        toast.success('Account created! Welcome to MoneyMap 🎉');
+      } else {
+        toast.success(`Account found! Welcome back, ${res?.user?.displayName || 'friend'}! 🎉`);
+      }
       navigate('/dashboard');
     } catch (err) {
-      toast.error(err.message || 'Google sign-in failed');
+      toast.error(err.message || 'Google sign-up failed');
     } finally {
       setGoogleLoading(false);
     }
@@ -129,7 +133,7 @@ export default function Register() {
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
               )}
-              Continue with Google
+              Sign up with Google
             </button>
           </div>
 

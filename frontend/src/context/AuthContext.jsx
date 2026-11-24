@@ -105,11 +105,67 @@ export function AuthProvider({ children }) {
     return demoUser;
   };
 
-  /** Google Sign-In with Mandatory Phone Number */
-  const loginWithGoogle = async (phoneNumber = '') => {
+  /**
+   * Google Sign-In for Existing Users (Login Page)
+   * Strictly checks if an account already exists. If not, signs out and throws NO_ACCOUNT_FOUND.
+   */
+  const signInWithGoogleLogin = async () => {
     if (isFirebaseConfigured && auth && googleProvider) {
       const cred = await signInWithPopup(auth, googleProvider);
-      const existing = await getUserProfile(cred.user.uid);
+      let existing = null;
+      try {
+        existing = await getUserProfile(cred.user.uid);
+      } catch (err) {
+        console.warn('Profile fetch notice:', err);
+      }
+
+      if (!existing) {
+        // Not registered yet! Sign out from Firebase session
+        await signOut(auth);
+        setUser(null);
+        setProfile(null);
+        const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
+        err.code = 'NO_ACCOUNT_FOUND';
+        err.email = cred.user.email;
+        throw err;
+      }
+
+      setUser(cred.user);
+      setProfile(existing);
+      return { user: cred.user, profile: existing };
+    }
+
+    // Demo Mode Google Login Check
+    const isDemoRegistered = localStorage.getItem('moneymap_demo_registered');
+    if (!isDemoRegistered) {
+      const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
+      err.code = 'NO_ACCOUNT_FOUND';
+      throw err;
+    }
+
+    const savedDemo = localStorage.getItem('moneymap_demo_session');
+    const demoData = savedDemo ? JSON.parse(savedDemo) : null;
+    const user = demoData?.user || { uid: 'google-demo-uid', displayName: 'Google Explorer', email: 'explorer@gmail.com', photoURL: '' };
+    const profile = demoData?.profile || { name: 'Google Explorer', email: 'explorer@gmail.com', currency: '₹', monthlyIncome: 70000, phoneNumber: '+91 98765 43210' };
+    setUser(user);
+    setProfile(profile);
+    return { user, profile };
+  };
+
+  /**
+   * Google Sign-Up for New Users (Register Page)
+   * Mandatory Phone Number is saved to their profile
+   */
+  const signUpWithGoogleRegister = async (phoneNumber = '') => {
+    if (isFirebaseConfigured && auth && googleProvider) {
+      const cred = await signInWithPopup(auth, googleProvider);
+      let existing = null;
+      try {
+        existing = await getUserProfile(cred.user.uid);
+      } catch (err) {
+        console.warn('Profile fetch notice:', err);
+      }
+
       const profileData = {
         name: cred.user.displayName || existing?.name || 'User',
         email: cred.user.email,
@@ -117,37 +173,46 @@ export function AuthProvider({ children }) {
         monthlyIncome: existing?.monthlyIncome || 0,
         photoURL: cred.user.photoURL || existing?.photoURL || '',
         phoneNumber: phoneNumber || existing?.phoneNumber || '',
+        createdAt: existing?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      if (!existing) {
-        profileData.createdAt = new Date().toISOString();
+
+      try {
+        await upsertUserProfile(cred.user.uid, profileData);
+      } catch (err) {
+        console.warn('Firestore profile save notice:', err);
       }
-      await upsertUserProfile(cred.user.uid, profileData);
+
+      setUser(cred.user);
       setProfile(profileData);
-      return cred.user;
+      return { user: cred.user, profile: profileData, isNew: !existing };
     }
 
-    // Demo Google Sign-In with Phone Number
-    const googleDemo = {
+    // Demo Mode Google Registration
+    const demoUser = {
       uid: 'google-demo-uid',
       displayName: 'Google Explorer',
       email: 'explorer@gmail.com',
       photoURL: '',
-      phoneNumber: phoneNumber || '+91 98765 43210',
+      phoneNumber,
     };
-    const googleProfile = {
+    const demoProfile = {
       name: 'Google Explorer',
       email: 'explorer@gmail.com',
       currency: '₹',
       monthlyIncome: 70000,
       photoURL: '',
-      phoneNumber: phoneNumber || '+91 98765 43210',
+      phoneNumber,
     };
-    localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: googleDemo, profile: googleProfile }));
-    setUser(googleDemo);
-    setProfile(googleProfile);
-    return googleDemo;
+    localStorage.setItem('moneymap_demo_registered', 'true');
+    localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: demoUser, profile: demoProfile }));
+    setUser(demoUser);
+    setProfile(demoProfile);
+    return { user: demoUser, profile: demoProfile, isNew: true };
   };
+
+  /** Legacy / alias for loginWithGoogle */
+  const loginWithGoogle = signInWithGoogleLogin;
 
   /** Instant 1-Click Demo Explore */
   const loginDemo = () => {
@@ -189,6 +254,8 @@ export function AuthProvider({ children }) {
     isFirebaseConfigured,
     login,
     loginWithGoogle,
+    signInWithGoogleLogin,
+    signUpWithGoogleRegister,
     loginDemo,
     register,
     logout,
