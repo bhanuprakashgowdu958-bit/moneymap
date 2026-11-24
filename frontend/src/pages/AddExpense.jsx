@@ -174,9 +174,7 @@ export default function AddExpense() {
     if (!cleanAmt || isNaN(numAmount) || numAmount <= 0) {
       return toast.error('Please enter the amount spent', { icon: '⚠️' });
     }
-    if (!form.title.trim()) {
-      return toast.error('Please enter what you spent on (e.g. Grocery Store)', { icon: '⚠️' });
-    }
+    const finalTitle = form.title.trim() || CATEGORIES[form.category]?.label || 'Expense';
     setLoading(true);
     try {
       let receiptUrl = '';
@@ -192,6 +190,7 @@ export default function AddExpense() {
 
       await addExpense(user.uid, {
         ...form,
+        title: finalTitle,
         amount: numAmount,
         receiptUrl,
         receiptPublicId,
@@ -366,7 +365,17 @@ export default function AddExpense() {
               <button
                 key={key}
                 type="button"
-                onClick={() => setForm({ ...form, category: key })}
+                onClick={() =>
+                  setForm((prev) => {
+                    const prevCatLabel = CATEGORIES[prev.category]?.label;
+                    const shouldAutoFill = !prev.title.trim() || prev.title === prevCatLabel;
+                    return {
+                      ...prev,
+                      category: key,
+                      title: shouldAutoFill ? cat.label : prev.title,
+                    };
+                  })
+                }
                 className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${
                   form.category === key
                     ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm scale-[1.02]'
