@@ -90,8 +90,9 @@ function extractAmount(text) {
  * Extract Merchant / Title
  */
 function extractMerchant(text) {
-  // "to ZOMATO", "at BLINKIT", "transfer to SWIGGY", "Info: UPI/UBER/...", "Paid to Chai Point"
+  // "Fv.THARU", "to ZOMATO", "at BLINKIT", "transfer to SWIGGY", "Info: UPI/UBER/...", "Paid to Chai Point"
   const merchantPatterns = [
+    /\bfv\.?\s*([A-Za-z0-9&.\- ]{2,30}?)(?:,|\s+bal|\s+on|$)/i,
     /(?:transfer\s+to|transferred\s+to|paid\s+to|to|at)\s+([A-Za-z0-9&.\- ]{2,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\.|$)/i,
     /info:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
     /(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
@@ -101,8 +102,8 @@ function extractMerchant(text) {
     const match = text.match(regex);
     if (match && match[1]) {
       const candidate = match[1].trim();
-      // Ignore common non-merchant words
-      if (!['a/c', 'account', 'card', 'upi', 'your', 'my', 'the'].includes(candidate.toLowerCase())) {
+      // Ignore pure helpline numbers and common non-merchant words
+      if (!/^\d+$/.test(candidate) && !['a/c', 'account', 'card', 'upi', 'your', 'my', 'the'].includes(candidate.toLowerCase())) {
         return capitalizeWords(candidate);
       }
     }

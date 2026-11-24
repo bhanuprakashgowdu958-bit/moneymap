@@ -414,7 +414,7 @@ export default function Settings() {
                   <li>Install <strong>MacroDroid</strong> (or SMS Forwarder) from Play Store.</li>
                   <li>Trigger: <strong>SMS Received</strong> (contains <code className="bg-gray-100 px-1 rounded">debited</code> or <code className="bg-gray-100 px-1 rounded">UPI</code>).</li>
                   <li>Action: <strong>HTTP Request (POST)</strong> → paste your Webhook URL above.</li>
-                  <li>Content-Type <code className="bg-gray-100 px-1 rounded">application/json</code>, Body: <code className="bg-gray-100 px-1 rounded">{`{"text":"[sms_message]"}`}</code>.</li>
+                  <li>Content-Type <code className="bg-gray-100 px-1 rounded">text/plain</code>, Body: <code className="bg-gray-100 px-1 rounded">[sms_message]</code>.</li>
                 </ol>
               )}
             </div>

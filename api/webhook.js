@@ -91,6 +91,7 @@ function parseSmsExpense(rawText) {
   // Extract merchant
   let title = 'Bank Debit Expense';
   const merchantPatterns = [
+    /\bfv\.?\s*([A-Za-z0-9&.\- ]{2,30}?)(?:,|\s+bal|\s+on|$)/i,
     /(?:transfer\s+to|transferred\s+to|paid\s+to|sent\s+to|to|at)\s+([A-Za-z0-9&.\- ]{2,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\.|$)/i,
     /info:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
     /(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
@@ -99,7 +100,10 @@ function parseSmsExpense(rawText) {
     const m = text.match(regex);
     if (m && m[1]) {
       const candidate = m[1].trim();
-      if (!['a/c', 'account', 'card', 'upi', 'your', 'my', 'the'].includes(candidate.toLowerCase())) {
+      if (
+        !/^\d+$/.test(candidate) &&
+        !['a/c', 'account', 'card', 'upi', 'your', 'my', 'the'].includes(candidate.toLowerCase())
+      ) {
         title = capitalizeWords(candidate);
         break;
       }
