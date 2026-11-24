@@ -168,6 +168,14 @@ export default async function handler(req, res) {
       `${FIRESTORE_BASE}/webhookTokens/${encodeURIComponent(token)}?key=${FIREBASE_API_KEY}`
     );
     if (!tokenRes.ok) {
+      const tokenErr = await tokenRes.json().catch(() => null);
+      if (tokenRes.status === 403) {
+        return res.status(403).json({
+          error:
+            tokenErr?.error?.message ||
+            'Firestore permission denied or Cloud Firestore API is not enabled.',
+        });
+      }
       return res.status(401).json({ error: 'Webhook token not found or revoked.' });
     }
     const tokenDoc = await tokenRes.json();
