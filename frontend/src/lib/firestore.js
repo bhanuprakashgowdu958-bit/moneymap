@@ -1,4 +1,4 @@
-// Firestore service layer — High Performance with Instant Local-First Caching
+// Firestore service layer — High Performance with Strict User Account Isolation
 import {
   collection,
   addDoc,
@@ -18,11 +18,27 @@ import {
 import { db, isFirebaseConfigured } from './firebase';
 
 // ─────────────────────────────────────────
-//  DEMO / LOCAL STORAGE FALLBACK HELPERS
+//  ISOLATED STORAGE HELPERS
 // ─────────────────────────────────────────
 const DEMO_STORAGE_KEY_EXPENSES = 'moneymap_demo_expenses';
 const DEMO_STORAGE_KEY_BUDGETS  = 'moneymap_demo_budgets';
 const DEMO_STORAGE_KEY_USER     = 'moneymap_demo_user';
+
+export function isDemoUser(uid) {
+  return !uid || uid === 'demo-user-123';
+}
+
+export function getExpenseStorageKey(uid) {
+  return isDemoUser(uid) ? DEMO_STORAGE_KEY_EXPENSES : `moneymap_user_expenses_${uid}`;
+}
+
+export function getBudgetStorageKey(uid) {
+  return isDemoUser(uid) ? DEMO_STORAGE_KEY_BUDGETS : `moneymap_user_budgets_${uid}`;
+}
+
+export function getUserProfileKey(uid) {
+  return isDemoUser(uid) ? DEMO_STORAGE_KEY_USER : `moneymap_user_profile_${uid}`;
+}
 
 /**
  * Fast network wrapper with strict timeout so UI never hangs
@@ -141,11 +157,11 @@ export function saveLocal(key, val) {
 // ─────────────────────────────────────────
 
 export async function upsertUserProfile(uid, data) {
-  // Always update local cache instantly for 0ms access
-  const current = loadLocal(DEMO_STORAGE_KEY_USER, {});
-  saveLocal(DEMO_STORAGE_KEY_USER, { ...current, ...data, uid });
+  const key = getUserProfileKey(uid);
+  const current = loadLocal(key, {});
+  saveLocal(key, { ...current, ...data, uid });
 
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = doc(db, 'users', uid);
       await withTimeout(setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true }), 1500);
@@ -156,18 +172,19 @@ export async function upsertUserProfile(uid, data) {
 }
 
 export async function getUserProfile(uid) {
-  // Check local stored profile first (0ms instantaneous!)
-  const local = loadLocal(DEMO_STORAGE_KEY_USER, null);
+  // Check user's isolated local profile first (0ms instantaneous!)
+  const key = getUserProfileKey(uid);
+  const local = loadLocal(key, null);
   if (local && (local.uid === uid || local.id === uid)) {
     return local;
   }
 
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const snap = await withTimeout(getDoc(doc(db, 'users', uid)), 1200, null);
       if (snap && snap.exists && snap.exists()) {
         const data = { id: snap.id, ...snap.data() };
-        saveLocal(DEMO_STORAGE_KEY_USER, data);
+        saveLocal(key, data);
         return data;
       }
     } catch (err) {
@@ -175,7 +192,7 @@ export async function getUserProfile(uid) {
     }
   }
 
-  return null;
+  return isDemoUser(uid) ? loadLocal(DEMO_STORAGE_KEY_USER, null) : null;
 }
 
 // ─────────────────────────────────────────
@@ -192,12 +209,13 @@ export async function addExpense(uid, data) {
     createdAt: new Date().toISOString(),
   };
 
-  // 1. Save to local storage instantly (0ms UI update!)
-  const expenses = loadLocal(DEMO_STORAGE_KEY_EXPENSES, getInitialDemoExpenses());
-  saveLocal(DEMO_STORAGE_KEY_EXPENSES, [newExpense, ...expenses]);
+  // 1. Save to user's isolated local storage (0ms UI update!)
+  const storageKey = getExpenseStorageKey(uid);
+  const currentExpenses = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoExpenses() : []);
+  saveLocal(storageKey, [newExpense, ...currentExpenses]);
 
   // 2. Sync to Firestore in background
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = collection(db, 'users', uid, 'expenses');
       await withTimeout(
@@ -219,17 +237,16 @@ export async function addExpense(uid, data) {
 }
 
 export async function updateExpense(uid, expenseId, data) {
-  // 1. Update local storage instantly
-  const expenses = loadLocal(DEMO_STORAGE_KEY_EXPENSES, getInitialDemoExpenses());
+  const storageKey = getExpenseStorageKey(uid);
+  const expenses = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoExpenses() : []);
   const updated = expenses.map((e) =>
     e.id === expenseId
       ? { ...e, ...data, amount: Number(data.amount), date: new Date(data.date).toISOString() }
       : e
   );
-  saveLocal(DEMO_STORAGE_KEY_EXPENSES, updated);
+  saveLocal(storageKey, updated);
 
-  // 2. Sync to Firestore in background
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = doc(db, 'users', uid, 'expenses', expenseId);
       await withTimeout(
@@ -248,12 +265,11 @@ export async function updateExpense(uid, expenseId, data) {
 }
 
 export async function deleteExpense(uid, expenseId) {
-  // 1. Update local storage instantly
-  const expenses = loadLocal(DEMO_STORAGE_KEY_EXPENSES, getInitialDemoExpenses());
-  saveLocal(DEMO_STORAGE_KEY_EXPENSES, expenses.filter((e) => e.id !== expenseId));
+  const storageKey = getExpenseStorageKey(uid);
+  const expenses = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoExpenses() : []);
+  saveLocal(storageKey, expenses.filter((e) => e.id !== expenseId));
 
-  // 2. Sync to Firestore in background
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       await withTimeout(deleteDoc(doc(db, 'users', uid, 'expenses', expenseId)), 1500);
     } catch (err) {
@@ -266,26 +282,32 @@ export async function getExpenses(uid, { month, year, category } = {}) {
   let expenses = [];
   let fetchedFromFirestore = false;
 
-  if (isFirebaseConfigured && db) {
+  // Real users: try Firestore first
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = collection(db, 'users', uid, 'expenses');
       const q = query(ref, orderBy('date', 'desc'));
       const snap = await withTimeout(getDocs(q), 1200, null);
-      if (snap && snap.docs && snap.docs.length > 0) {
+      if (snap && snap.docs) {
         expenses = snap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
           date: d.data().date?.toDate?.() ?? new Date(d.data().date),
         }));
         fetchedFromFirestore = true;
+        // Keep user's isolated local cache in sync
+        saveLocal(getExpenseStorageKey(uid), expenses);
       }
     } catch (err) {
       console.warn('Firestore getExpenses notice:', err.message);
     }
   }
 
+  // If not fetched from Firestore, load from user's isolated storage
+  // Real users start with [] (EMPTY), demo users start with sample data
   if (!fetchedFromFirestore) {
-    expenses = loadLocal(DEMO_STORAGE_KEY_EXPENSES, getInitialDemoExpenses()).map((e) => ({
+    const defaultData = isDemoUser(uid) ? getInitialDemoExpenses() : [];
+    expenses = loadLocal(getExpenseStorageKey(uid), defaultData).map((e) => ({
       ...e,
       date: new Date(e.date),
     }));
@@ -355,7 +377,8 @@ export async function getWeeklyData(uid, preloadedExpenses = null) {
 
 export async function setBudget(uid, { category, limit, month, year, alertAt = 80 }) {
   const docId = `${category}_${month}_${year}`;
-  const budgets = loadLocal(DEMO_STORAGE_KEY_BUDGETS, getInitialDemoBudgets());
+  const storageKey = getBudgetStorageKey(uid);
+  const budgets = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoBudgets() : []);
   const existingIdx = budgets.findIndex((b) => b.category === category && b.month === month && b.year === year);
   const entry = { id: docId, category, limit: Number(limit), month, year, alertAt };
   if (existingIdx >= 0) {
@@ -363,9 +386,9 @@ export async function setBudget(uid, { category, limit, month, year, alertAt = 8
   } else {
     budgets.push(entry);
   }
-  saveLocal(DEMO_STORAGE_KEY_BUDGETS, budgets);
+  saveLocal(storageKey, budgets);
 
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = doc(db, 'users', uid, 'budgets', docId);
       await withTimeout(setDoc(ref, { category, limit: Number(limit), month, year, alertAt, updatedAt: serverTimestamp() }), 1500);
@@ -378,27 +401,35 @@ export async function setBudget(uid, { category, limit, month, year, alertAt = 8
 }
 
 export async function getBudgets(uid, month, year) {
-  if (isFirebaseConfigured && db) {
+  const storageKey = getBudgetStorageKey(uid);
+
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = collection(db, 'users', uid, 'budgets');
       const q = query(ref, where('month', '==', month), where('year', '==', year));
       const snap = await withTimeout(getDocs(q), 1200, null);
-      if (snap && snap.docs && snap.docs.length > 0) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (snap && snap.docs) {
+        const budgets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        saveLocal(storageKey, budgets);
+        return budgets;
       }
     } catch (err) {
       console.warn('Firestore getBudgets notice:', err.message);
     }
   }
-  const all = loadLocal(DEMO_STORAGE_KEY_BUDGETS, getInitialDemoBudgets());
+
+  // Real users start with [] (EMPTY), demo user gets sample budgets
+  const defaultBudgets = isDemoUser(uid) ? getInitialDemoBudgets() : [];
+  const all = loadLocal(storageKey, defaultBudgets);
   return all.filter((b) => b.month === month && b.year === year);
 }
 
 export async function deleteBudget(uid, budgetId) {
-  const all = loadLocal(DEMO_STORAGE_KEY_BUDGETS, getInitialDemoBudgets());
-  saveLocal(DEMO_STORAGE_KEY_BUDGETS, all.filter((b) => b.id !== budgetId));
+  const storageKey = getBudgetStorageKey(uid);
+  const all = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoBudgets() : []);
+  saveLocal(storageKey, all.filter((b) => b.id !== budgetId));
 
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       await withTimeout(deleteDoc(doc(db, 'users', uid, 'budgets', budgetId)), 1500);
     } catch (err) {

@@ -9,12 +9,11 @@ import {
   getAdditionalUserInfo,
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
-import { upsertUserProfile, getUserProfile, loadLocal, saveLocal } from '../lib/firestore';
+import { upsertUserProfile, getUserProfile, getUserProfileKey, loadLocal, saveLocal } from '../lib/firestore';
 
 const AuthContext = createContext(null);
 
 const STORAGE_KEY_REGISTERED = 'moneymap_registered_accounts';
-const DEMO_STORAGE_KEY_USER   = 'moneymap_demo_user';
 
 /**
  * Checks whether an account was explicitly registered with phone number (instant 0ms)
@@ -70,7 +69,7 @@ export function AuthProvider({ children }) {
       const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         if (firebaseUser) {
           const isRegistered = isAccountRegistered(firebaseUser.email, firebaseUser.uid);
-          const cachedLocal = loadLocal(DEMO_STORAGE_KEY_USER, null);
+          const cachedLocal = loadLocal(getUserProfileKey(firebaseUser.uid), null);
 
           // If session belongs to an unregistered user who never completed registration flow:
           if (!isRegistered && (!cachedLocal || !cachedLocal.phoneNumber)) {
@@ -206,7 +205,7 @@ export function AuthProvider({ children }) {
 
     // Instant local check first (0ms)
     const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
-    const cachedProfile = loadLocal(DEMO_STORAGE_KEY_USER, null);
+    const cachedProfile = loadLocal(getUserProfileKey(cred.user.uid), null);
     const hasPhoneCached = Boolean(cachedProfile && cachedProfile.phoneNumber);
 
     if (additionalInfo?.isNewUser || (!isRegisteredLocal && !hasPhoneCached)) {
@@ -272,7 +271,7 @@ export function AuthProvider({ children }) {
       phoneNumber,
       name: profileData.name,
     });
-    saveLocal(DEMO_STORAGE_KEY_USER, { ...profileData, uid: cred.user.uid });
+    saveLocal(getUserProfileKey(cred.user.uid), { ...profileData, uid: cred.user.uid });
 
     // 2. Set user immediately so UI unblocks instantly
     setUser(cred.user);
@@ -317,7 +316,7 @@ export function AuthProvider({ children }) {
     if (!user) return;
     const updated = { ...profile, ...data };
     setProfile(updated);
-    saveLocal(DEMO_STORAGE_KEY_USER, { ...updated, uid: user.uid });
+    saveLocal(getUserProfileKey(user.uid), { ...updated, uid: user.uid });
     upsertUserProfile(user.uid, data).catch(() => {});
     if (isFirebaseConfigured && auth?.currentUser) {
       if (data.name) updateProfile(auth.currentUser, { displayName: data.name }).catch(() => {});
