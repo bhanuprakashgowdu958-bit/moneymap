@@ -95,7 +95,7 @@ export default function Login() {
             type="button"
             onClick={handleGoogle}
             disabled={googleLoading}
-            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-white border border-gray-300 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 shadow-sm transition-all mb-4"
+            className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-white border border-gray-300 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 shadow-sm transition-all mb-2"
           >
             {googleLoading ? (
               <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
@@ -109,6 +109,13 @@ export default function Login() {
             )}
             Sign in with Google
           </button>
+          <p className="text-[11px] text-gray-500 text-center mb-4">
+            Existing users only. If you don't have an account yet, please{' '}
+            <Link to="/register" className="text-blue-600 font-semibold hover:underline">
+              create one first
+            </Link>
+            .
+          </p>
 
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-px bg-gray-100"></div>

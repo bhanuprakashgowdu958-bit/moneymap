@@ -130,27 +130,37 @@ function saveLocal(key, val) {
 // ─────────────────────────────────────────
 
 export async function upsertUserProfile(uid, data) {
-  if (isFirebaseConfigured && db) {
-    const ref = doc(db, 'users', uid);
-    await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
-    return;
-  }
+  // Always update local cache for resilience
   const current = loadLocal(DEMO_STORAGE_KEY_USER, {});
-  saveLocal(DEMO_STORAGE_KEY_USER, { ...current, ...data });
+  saveLocal(DEMO_STORAGE_KEY_USER, { ...current, ...data, uid });
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const ref = doc(db, 'users', uid);
+      await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
+    } catch (err) {
+      console.warn('Firestore upsertUserProfile notice:', err.message);
+    }
+  }
 }
 
 export async function getUserProfile(uid) {
   if (isFirebaseConfigured && db) {
-    const snap = await getDoc(doc(db, 'users', uid));
-    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    try {
+      const snap = await getDoc(doc(db, 'users', uid));
+      if (snap.exists()) {
+        return { id: snap.id, ...snap.data() };
+      }
+    } catch (err) {
+      console.warn('Firestore getUserProfile notice:', err.message);
+    }
   }
-  return loadLocal(DEMO_STORAGE_KEY_USER, {
-    name: 'Rahul Sharma',
-    email: 'demo@moneymap.app',
-    currency: '₹',
-    monthlyIncome: 65000,
-    photoURL: '',
-  });
+  // Check local stored profile
+  const local = loadLocal(DEMO_STORAGE_KEY_USER, null);
+  if (local && (local.uid === uid || local.id === uid)) {
+    return local;
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────
