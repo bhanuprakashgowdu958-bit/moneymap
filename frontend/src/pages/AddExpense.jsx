@@ -42,6 +42,11 @@ export default function AddExpense() {
   const [ocrDetected, setOcrDetected] = useState(null);
   const fileRef = useRef();
 
+  const hasGeminiKey = Boolean(
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) ||
+    (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('gemini_api_key'))
+  );
+
   const [form, setForm] = useState({
     title:         '',
     amount:        '',
@@ -405,8 +410,8 @@ export default function AddExpense() {
         <div>
           <label className="label flex items-center justify-between">
             <span>Receipt Photo or Payment Screenshot (Auto-Detects Amount)</span>
-            <span className={`text-xs font-medium ${ocrDetected?.isAiVision ? 'text-primary' : 'text-blue-600'}`}>
-              {ocrDetected?.isAiVision ? '✨ Gemini AI Vision Active' : 'AI OCR Scanner Active'}
+            <span className={`text-xs font-medium ${ocrDetected?.isAiVision || hasGeminiKey ? 'text-primary' : 'text-blue-600'}`}>
+              {ocrDetected?.isAiVision ? '✨ Gemini AI Vision Active' : hasGeminiKey ? '✨ Gemini AI Vision Ready' : 'AI OCR Scanner Active'}
             </span>
           </label>
           <input
