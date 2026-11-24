@@ -110,6 +110,20 @@ export default function AddExpense() {
     try {
       const data = await scanReceiptImage(file, (pct) => setOcrProgress(pct));
       if (data) {
+        // Authenticity Check: If image is NOT a payment receipt/bill (e.g. terminal logs, memes, code errors)
+        if (!data.isReceipt) {
+          setOcrDetected({
+            isReceipt: false,
+            message: 'Image is not a payment receipt or bill.',
+            rawText: data.rawText,
+          });
+          toast('Not a payment receipt or bill. Please enter the amount manually.', {
+            icon: '⚠️',
+            duration: 5000,
+          });
+          return;
+        }
+
         const detectedAmt = sanitizeAmount(data.amount);
 
         const resolvedData = {
@@ -262,12 +276,16 @@ export default function AddExpense() {
       <form onSubmit={handleSubmit} className="card space-y-5">
         {/* Amount - hero field */}
         <div className="text-center py-5 px-6 bg-gray-50 rounded-2xl relative overflow-hidden">
-          {/* Subtle OCR success banner inside amount container */}
-          {ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
+          {/* Subtle OCR success or warning banner inside amount container */}
+          {ocrDetected && ocrDetected.isReceipt === false ? (
+            <div className="absolute top-0 inset-x-0 bg-amber-500 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
+              <span>⚠️</span> Not recognized as a payment receipt — please enter the amount manually
+            </div>
+          ) : ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
             <div className="absolute top-0 inset-x-0 bg-emerald-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
               <span>✨</span> Auto-detected: {currency}{sanitizeAmount(ocrDetected.amount)} spent at <strong>{ocrDetected.title}</strong> ({CATEGORIES[ocrDetected.category]?.label || ocrDetected.category})
             </div>
-          ) : ocrDetected ? (
+          ) : ocrDetected && ocrDetected.title ? (
             <div className="absolute top-0 inset-x-0 bg-blue-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
               <span>📍</span> Detected: <strong>{ocrDetected.title}</strong> — please enter the amount below
             </div>
@@ -438,11 +456,15 @@ export default function AddExpense() {
                 <span className="text-gray-500 flex items-center gap-1.5">
                   ☁️ Will be saved to Cloudinary
                 </span>
-                {ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
+                {ocrDetected && ocrDetected.isReceipt === false ? (
+                  <span className="text-amber-800 font-medium flex items-center gap-1 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-md">
+                    ⚠️ Not a payment receipt
+                  </span>
+                ) : ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
                   <span className="text-emerald-700 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md">
                     ✓ Amount auto-filled: {currency}{sanitizeAmount(ocrDetected.amount)}
                   </span>
-                ) : ocrDetected ? (
+                ) : ocrDetected && ocrDetected.title ? (
                   <span className="text-blue-700 font-semibold flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md">
                     ✓ Scanned: {ocrDetected.title}
                   </span>

@@ -62,7 +62,7 @@ const KNOWN_MERCHANTS = [
   { pattern: /indian\s*oil|iocl/i, name: 'Indian Oil Petrol', category: 'transport' },
   { pattern: /bharat\s*petroleum|bpcl/i, name: 'Bharat Petroleum', category: 'transport' },
   { pattern: /hindustan\s*petroleum|hpcl/i, name: 'HP Petrol Bunk', category: 'transport' },
-  { pattern: /shell/i, name: 'Shell Fuel', category: 'transport' },
+  { pattern: /\bshell\s*(?:petrol|fuel|bunk|station|gas)?\b/i, name: 'Shell Fuel', category: 'transport' },
   { pattern: /fastag|toll/i, name: 'FASTag Toll', category: 'transport' },
 
   // Shopping & E-Commerce
@@ -399,6 +399,42 @@ async function getOptimalScanTarget(imageFile) {
 }
 
 /**
+ * Strict Receipt & Payment Verification:
+ * Validates whether the scanned image contains authentic financial receipt or payment signals.
+ * Disqualifies code dumps, terminal logs, casual screenshots, and memes so random numbers are NEVER auto-filled!
+ */
+export function isFinancialReceiptOrPayment(rawText) {
+  if (!rawText || rawText.trim().length < 5) return false;
+
+  // 1. Definite non-receipt disqualifiers (programming logs, cmd errors, code)
+  const isCodeOrSystemDump = /(?:npm error|code ENOENT|powershell|cmd\.exe|syntaxerror|exception in thread|at Worker\.|fatal: unable|undefined is not a function)/i.test(rawText);
+  const hasStrongFinancialEvidence = /(?:paid\s*to|debited|credited|transaction\s*successful|payment\s*successful|tax\s*invoice|cash\s*memo|gstin|utr:\s*\d)/i.test(rawText);
+  if (isCodeOrSystemDump && !hasStrongFinancialEvidence) {
+    return false;
+  }
+
+  // 2. Positive financial / receipt signals
+  const financialSignals = [
+    // UPI / Bank Transaction keywords
+    /\b(?:paid\s*to|debited|credited|transferred|transaction\s*successful|payment\s*successful|completed|transfer\s*details|payment\s*to)\b/i,
+    /\b(?:utr|ref\s*no|txn\s*id|transaction\s*id|upi\s*id|vpa|banking|upi\s*ref)\b/i,
+    /\b(?:phonepe|gpay|google\s*pay|paytm|bhim|cred|amazon\s*pay|navi|bharatpe)\b/i,
+    // Store receipts & Invoices
+    /\b(?:tax\s*invoice|cash\s*memo|bill\s*of\s*supply|invoice|receipt|subtotal|grand\s*total|net\s*payable|bill\s*amount|gstin|cgst|sgst|igst|hsn)\b/i,
+    // Currency indicators with digits
+    /(?:₹|rs\.?|inr|inr\.)\s*[0-9]/i,
+    // Masked bank accounts
+    /[X*×•]{3,}\d{2,6}/,
+    // Pre-UTR or post-merchant UPI format
+    /\b(?:utr:\s*\d{8,16})\b/i,
+    // Popular Indian food & grocery receipt signatures
+    /\b(?:swiggy|zomato|blinkit|zepto|instamart|bigbasket|dmart|mcdonald|starbucks)\b/i
+  ];
+
+  return financialSignals.some((regex) => regex.test(rawText));
+}
+
+/**
  * Master OCR Image Scanner
  */
 export async function scanReceiptImage(imageFile, onProgress) {
@@ -419,6 +455,23 @@ export async function scanReceiptImage(imageFile, onProgress) {
       .filter((l) => l.length >= 2);
 
     console.log('[MoneyMap OCR] Scanned Text:\n', rawText);
+
+    // Step 1: Verify whether this image is genuinely a financial receipt or payment screenshot
+    const isReceipt = isFinancialReceiptOrPayment(rawText);
+    if (!isReceipt) {
+      console.warn('[MoneyMap OCR] Uploaded image rejected: Not a valid payment receipt or bill.');
+      return {
+        success: true,
+        isReceipt: false,
+        amount: '',
+        title: '',
+        category: '',
+        paymentMethod: '',
+        reference: '',
+        rawText,
+        message: 'This image does not appear to be a payment receipt or bill.'
+      };
+    }
 
     // 1. Extract Amount using smart cleaner
     let amount = extractSmartAmount(rawText);
@@ -459,6 +512,7 @@ export async function scanReceiptImage(imageFile, onProgress) {
 
     return {
       success: true,
+      isReceipt: true,
       amount: amount !== null ? amount : '',
       title: merchantInfo.title,
       category,
