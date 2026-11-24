@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { getOrCreateWebhookToken, regenerateWebhookToken, isDemoUser } from '../lib/firestore';
+import { downloadMacroDroidGuidePdf } from '../lib/macrodroidPdf';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -381,7 +382,7 @@ export default function Settings() {
 
             {/* 60-Second Setup Guide Tabs */}
             <div className="bg-white rounded-xl border border-gray-200 p-3.5">
-              <div className="flex gap-2 mb-3">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
                 <button
                   type="button"
                   onClick={() => setGuideTab('ios')}
@@ -399,6 +400,18 @@ export default function Settings() {
                   }`}
                 >
                   🤖 Android (MacroDroid)
+                </button>
+                <button
+                  type="button"
+                  disabled={!webhookUrl}
+                  onClick={() => {
+                    downloadMacroDroidGuidePdf(webhookUrl, displayName || 'User');
+                    toast.success('MacroDroid Setup Guide PDF downloaded! 📄');
+                  }}
+                  className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  title="Download complete step-by-step MacroDroid PDF guide with your personal Webhook URL"
+                >
+                  <span>📄</span> Download PDF Guide
                 </button>
               </div>
 
