@@ -102,7 +102,11 @@ const NOISE_WORDS = [
   'tax invoice', 'cash memo', 'invoice', 'receipt', 'bill', 'original', 'duplicate',
   'gstin', 'gst', 'date', 'time', 'phone', 'tel', 'mobile', 'pos', 'terminal',
   'merchant copy', 'customer copy', 'welcome', 'thank you', 'total', 'subtotal',
-  'debited from', 'paid to', 'transaction successful', 'completed', 'utr', 'ref no'
+  'debited from', 'paid to', 'transaction successful', 'completed', 'utr', 'ref no',
+  'receipt photo', 'payment screenshot', 'auto-detects amount', 'auto detects amount',
+  'detects amount', 'magic auto-fill', 'magic sms', 'amount spent', 'paste sms',
+  'what did you spend on', 'stored on cloudinary', 'will be saved to cloudinary',
+  'amount auto-filled', 'view scanned ocr text', 'recurring monthly expense'
 ];
 
 /**
@@ -213,15 +217,15 @@ export function extractSmartAmount(rawText) {
     .filter((n) => !isNaN(n.val) && n.val >= 1 && n.val <= 500000 && (!n.str.startsWith('0') || n.str.startsWith('0.')));
 
   if (allNums.length > 0) {
-    // If a number repeats, it has highest confidence (PhonePe renders amount twice)
+    // Only return if the exact amount repeats in the document (PhonePe renders transaction amount twice)
     const freq = {};
     for (const n of allNums) freq[n.val] = (freq[n.val] || 0) + 1;
     for (const v in freq) {
       if (freq[v] > 1) return parseFloat(v);
     }
-    return allNums[0].val;
   }
 
+  // Never blindly return stray numbers that have no currency/total anchor
   return null;
 }
 
@@ -406,32 +410,47 @@ async function getOptimalScanTarget(imageFile) {
 export function isFinancialReceiptOrPayment(rawText) {
   if (!rawText || rawText.trim().length < 5) return false;
 
-  // 1. Definite non-receipt disqualifiers (programming logs, cmd errors, code)
-  const isCodeOrSystemDump = /(?:npm error|code ENOENT|powershell|cmd\.exe|syntaxerror|exception in thread|at Worker\.|fatal: unable|undefined is not a function)/i.test(rawText);
-  const hasStrongFinancialEvidence = /(?:paid\s*to|debited|credited|transaction\s*successful|payment\s*successful|tax\s*invoice|cash\s*memo|gstin|utr:\s*\d)/i.test(rawText);
-  if (isCodeOrSystemDump && !hasStrongFinancialEvidence) {
+  // 1. Instant disqualifiers: programming logs, terminal errors, or recursive screenshots of MoneyMap UI
+  const isTerminalOrCodeDump = /(?:npm\s+error|code\s+ENOENT|powershell|cmd\.exe|PS\s+[A-Z]:\\|node_modules|syntaxerror|exception in thread|at Worker\.|fatal:\s+unable)/i.test(rawText);
+  if (isTerminalOrCodeDump) {
     return false;
   }
 
-  // 2. Positive financial / receipt signals
-  const financialSignals = [
-    // UPI / Bank Transaction keywords
-    /\b(?:paid\s*to|debited|credited|transferred|transaction\s*successful|payment\s*successful|completed|transfer\s*details|payment\s*to)\b/i,
-    /\b(?:utr|ref\s*no|txn\s*id|transaction\s*id|upi\s*id|vpa|banking|upi\s*ref)\b/i,
-    /\b(?:phonepe|gpay|google\s*pay|paytm|bhim|cred|amazon\s*pay|navi|bharatpe)\b/i,
-    // Store receipts & Invoices
-    /\b(?:tax\s*invoice|cash\s*memo|bill\s*of\s*supply|invoice|receipt|subtotal|grand\s*total|net\s*payable|bill\s*amount|gstin|cgst|sgst|igst|hsn)\b/i,
-    // Currency indicators with digits
-    /(?:₹|rs\.?|inr|inr\.)\s*[0-9]/i,
-    // Masked bank accounts
-    /[X*×•]{3,}\d{2,6}/,
-    // Pre-UTR or post-merchant UPI format
-    /\b(?:utr:\s*\d{8,16})\b/i,
-    // Popular Indian food & grocery receipt signatures
-    /\b(?:swiggy|zomato|blinkit|zepto|instamart|bigbasket|dmart|mcdonald|starbucks)\b/i
-  ];
+  const isSelfAppScreenshot = /(?:magic\s+auto-fill|auto-detects\s+amount|amount\s+auto-filled|view\s+scanned\s+ocr|what\s+did\s+you\s+spend|recurring\s+monthly\s+expense)/i.test(rawText);
+  if (isSelfAppScreenshot) {
+    return false;
+  }
 
-  return financialSignals.some((regex) => regex.test(rawText));
+  // 2. Strict Multi-Factor Scoring
+  let score = 0;
+
+  // Factor A: Explicit transaction / invoice action (+2 points)
+  if (/\b(?:transaction\s+successful|payment\s+successful|payment\s+completed|paid\s+to|transfer\s+details|debited\s+from|transferred\s+to|tax\s+invoice|cash\s+memo|bill\s+of\s+supply|retail\s+invoice)\b/i.test(rawText)) {
+    score += 2;
+  }
+
+  // Factor B: Reference / Transaction ID (+1 point)
+  if (/\b(?:utr\s*[:-]?\s*\d{8,16}|txn\s*id|transaction\s*id|upi\s*ref|gstin\s*[:#-]?\s*[0-9A-Z]{15})\b/i.test(rawText)) {
+    score += 1;
+  }
+
+  // Factor C: Anchored currency (+1 point)
+  if (/(?:[₹¥$€£]|rs\.?|inr)\s*[0-9]+(?:\.[0-9]{1,2})?/i.test(rawText)) {
+    score += 1;
+  }
+
+  // Factor D: Verified UPI branding (+1 point)
+  if (/\b(?:phonepe|google\s*pay|gpay|paytm|bhim\s*upi|cred|amazon\s*pay)\b/i.test(rawText)) {
+    score += 1;
+  }
+
+  // Factor E: Masked Account (+1 point)
+  if (/[X*×•]{3,}\d{2,6}/.test(rawText)) {
+    score += 1;
+  }
+
+  // Require at least 2 strong points to be considered a genuine receipt/payment screenshot
+  return score >= 2;
 }
 
 /**
