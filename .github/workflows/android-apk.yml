@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -38,12 +38,17 @@ jobs:
             "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
           fi
 
-      - name: Install frontend dependencies & sync Capacitor
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
-          npx cap sync android
+        run: npm install --no-audit --no-fund
+
+      - name: Build web assets
+        working-directory: frontend
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        working-directory: frontend
+        run: npx cap sync android
 
       - name: Grant Gradle Wrapper execute permission
         working-directory: frontend/android
