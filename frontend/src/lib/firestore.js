@@ -40,10 +40,13 @@ export function getUserProfileKey(uid) {
   return isDemoUser(uid) ? DEMO_STORAGE_KEY_USER : `moneymap_user_profile_${uid}`;
 }
 
+const FIRESTORE_READ_TIMEOUT_MS = 6000;
+const FIRESTORE_WRITE_TIMEOUT_MS = 6000;
+
 /**
- * Fast network wrapper with strict timeout so UI never hangs
+ * Fast network wrapper with timeout so UI never hangs indefinitely
  */
-export async function withTimeout(promise, ms = 1200, fallback = null) {
+export async function withTimeout(promise, ms = FIRESTORE_READ_TIMEOUT_MS, fallback = null) {
   let timer;
   const timeoutPromise = new Promise((resolve) => {
     timer = setTimeout(() => resolve(fallback), ms);
@@ -164,24 +167,33 @@ export async function upsertUserProfile(uid, data) {
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = doc(db, 'users', uid);
-      await withTimeout(setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true }), 1500);
+      await withTimeout(
+        setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true }),
+        FIRESTORE_WRITE_TIMEOUT_MS
+      );
     } catch (err) {
       console.warn('Firestore upsertUserProfile notice:', err.message);
     }
   }
 }
 
-export async function getUserProfile(uid) {
-  // Check user's isolated local profile first (0ms instantaneous!)
+export async function getUserProfile(uid, { skipLocal = false } = {}) {
   const key = getUserProfileKey(uid);
-  const local = loadLocal(key, null);
-  if (local && (local.uid === uid || local.id === uid)) {
-    return local;
+  if (!skipLocal) {
+    // Check user's isolated local profile first (0ms instantaneous!)
+    const local = loadLocal(key, null);
+    if (local && (local.uid === uid || local.id === uid)) {
+      return local;
+    }
   }
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
-      const snap = await withTimeout(getDoc(doc(db, 'users', uid)), 1200, null);
+      const snap = await withTimeout(
+        getDoc(doc(db, 'users', uid)),
+        FIRESTORE_READ_TIMEOUT_MS,
+        null
+      );
       if (snap && snap.exists && snap.exists()) {
         const data = { id: snap.id, ...snap.data() };
         saveLocal(key, data);
@@ -287,7 +299,7 @@ export async function getExpenses(uid, { month, year, category } = {}) {
     try {
       const ref = collection(db, 'users', uid, 'expenses');
       const q = query(ref, orderBy('date', 'desc'));
-      const snap = await withTimeout(getDocs(q), 1200, null);
+      const snap = await withTimeout(getDocs(q), FIRESTORE_READ_TIMEOUT_MS, null);
       if (snap && snap.docs) {
         expenses = snap.docs.map((d) => ({
           id: d.id,
@@ -407,7 +419,7 @@ export async function getBudgets(uid, month, year) {
     try {
       const ref = collection(db, 'users', uid, 'budgets');
       const q = query(ref, where('month', '==', month), where('year', '==', year));
-      const snap = await withTimeout(getDocs(q), 1200, null);
+      const snap = await withTimeout(getDocs(q), FIRESTORE_READ_TIMEOUT_MS, null);
       if (snap && snap.docs) {
         const budgets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         saveLocal(storageKey, budgets);
