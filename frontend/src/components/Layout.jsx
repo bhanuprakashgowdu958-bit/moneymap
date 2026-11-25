@@ -31,7 +31,7 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-gray-50 flex">
+    <div className="h-[100dvh] bg-gray-50 flex overflow-hidden">
       {/* Sidebar - Desktop */}
       <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r border-gray-100 fixed inset-y-0 left-0 z-10 shadow-sm overflow-y-auto">
         {/* Logo */}
@@ -119,7 +119,7 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0 lg:ml-64">
+      <main className="flex-1 min-w-0 lg:ml-64 flex flex-col overflow-hidden">
         {/* Top bar - mobile */}
         <header className="lg:hidden bg-white/95 backdrop-blur-md border-b border-gray-100 px-4 pb-2.5 pt-safe min-h-[56px] flex items-center justify-between sticky top-0 z-30 shadow-sm">
           <NavLink to="/dashboard" className="flex items-center gap-2.5 min-w-0">
@@ -158,7 +158,7 @@ export default function Layout({ children }) {
         </header>
 
         {/* Page content */}
-        <div className="px-3.5 py-4 sm:p-6 lg:p-8 pb-28 lg:pb-8 page-enter max-w-7xl mx-auto">
+        <div className="flex-1 overflow-y-auto px-3.5 py-4 sm:p-6 lg:p-8 pb-28 lg:pb-8 page-enter max-w-7xl mx-auto w-full">
           {children}
         </div>
       </main>

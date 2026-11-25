@@ -349,9 +349,9 @@ export default function AddExpense() {
               placeholder="0"
               value={form.amount}
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)}
               min="0.01"
               step="0.01"
-              autoFocus
             />
           </div>
 
@@ -399,6 +399,7 @@ export default function AddExpense() {
             placeholder="e.g. Zomato dinner, Uber ride, Blinkit..."
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
+            onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300)}
           />
         </div>
 
