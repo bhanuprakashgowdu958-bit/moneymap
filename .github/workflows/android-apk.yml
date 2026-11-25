@@ -28,8 +28,15 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses & Ensure SDK 36
+        run: |
+          SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "Android SDK: $SDK_DIR"
+          SDKMANAGER=$(find "$SDK_DIR" -name sdkmanager -type f 2>/dev/null | head -n 1)
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          fi
 
       - name: Install frontend dependencies & sync Capacitor
         working-directory: frontend
