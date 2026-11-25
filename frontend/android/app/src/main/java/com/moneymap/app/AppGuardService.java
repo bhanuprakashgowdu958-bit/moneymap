@@ -117,9 +117,10 @@ public class AppGuardService extends Service {
         String checkBase = MoneyMapPrefs.getBudgetCheckBase(this);
         if (checkBase == null || checkBase.isEmpty()) return;
 
-        MoneyMapPrefs.setLastGuardAlertTime(this, resumedPkg, now);
-        String url = checkBase + "&category=" + category + "&format=text";
-        executor.execute(() -> fetchAndAlert(url, resumedPkg));
+        final String targetPkg = resumedPkg;
+        MoneyMapPrefs.setLastGuardAlertTime(this, targetPkg, now);
+        final String url = checkBase + "&category=" + category + "&format=text";
+        executor.execute(() -> fetchAndAlert(url, targetPkg));
     }
 
     private void fetchAndAlert(String urlStr, String pkg) {
