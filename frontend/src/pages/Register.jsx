@@ -7,10 +7,8 @@ export default function Register() {
   const [googlePhone, setGooglePhone] = useState('');
   const [phoneError, setPhoneError]   = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [emailForm, setEmailForm] = useState({ name: '', email: '', password: '' });
-  const [emailLoading, setEmailLoading] = useState(false);
   const phoneInputRef = useRef(null);
-  const { signUpWithGoogleRegister, register } = useAuth();
+  const { signUpWithGoogleRegister } = useAuth();
   const navigate = useNavigate();
 
   const handleGoogle = async () => {
@@ -56,34 +54,6 @@ export default function Register() {
     }
   };
 
-  const handleEmailRegister = async (e) => {
-    e.preventDefault();
-    const cleaned = googlePhone.trim().replace(/\D/g, '');
-    if (cleaned.length !== 10) {
-      setPhoneError('Please enter a valid 10-digit mobile number');
-      toast.error('Please enter a valid 10-digit mobile number');
-      if (phoneInputRef.current) phoneInputRef.current.focus();
-      return;
-    }
-    setPhoneError('');
-    setEmailLoading(true);
-    try {
-      await register(
-        emailForm.name.trim(),
-        emailForm.email.trim(),
-        emailForm.password,
-        0,
-        `+91 ${cleaned}`
-      );
-      toast.success('Account created! Welcome to MoneyMap 🎉');
-      navigate('/dashboard');
-    } catch (err) {
-      toast.error(err.message || 'Sign-up failed');
-    } finally {
-      setEmailLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-[100dvh] bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4 py-8">
       <div className="w-full max-w-md">
@@ -99,7 +69,7 @@ export default function Register() {
           <h2 className="text-xl font-bold text-gray-900 mb-6">Create your free account</h2>
 
           {/* Google Sign In with Mandatory Phone Number */}
-          <div className="bg-gradient-to-br from-blue-50/60 to-indigo-50/40 border border-blue-100 rounded-2xl p-4 mb-4">
+          <div className="bg-gradient-to-br from-blue-50/60 to-indigo-50/40 border border-blue-100 rounded-2xl p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
                 <span>📱 Mobile Number</span>
@@ -156,58 +126,6 @@ export default function Register() {
               Sign up with Google
             </button>
           </div>
-
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-1 h-px bg-gray-100"></div>
-            <span className="text-xs text-gray-400 font-medium">
-              or sign up with email
-            </span>
-            <div className="flex-1 h-px bg-gray-100"></div>
-          </div>
-
-          <form onSubmit={handleEmailRegister} className="space-y-3">
-            <div>
-              <label className="label text-xs">Full Name</label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Your name"
-                value={emailForm.name}
-                onChange={(e) => setEmailForm({ ...emailForm, name: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="label text-xs">Email Address</label>
-              <input
-                type="email"
-                className="input-field"
-                placeholder="you@example.com"
-                value={emailForm.email}
-                onChange={(e) => setEmailForm({ ...emailForm, email: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="label text-xs">Password (min 6 chars)</label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="••••••••"
-                minLength={6}
-                value={emailForm.password}
-                onChange={(e) => setEmailForm({ ...emailForm, password: e.target.value })}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={emailLoading}
-              className="btn-primary w-full flex items-center justify-center gap-2"
-            >
-              {emailLoading ? 'Creating account...' : 'Create Account →'}
-            </button>
-          </form>
 
           <p className="text-center text-sm text-gray-500 mt-6">
             Already have an account?{' '}

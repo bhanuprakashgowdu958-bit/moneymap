@@ -134,11 +134,12 @@ export function AuthProvider({ children }) {
 
   /** Register with email & password */
   const register = async (name, email, password, monthlyIncome = 0, phoneNumber = '') => {
+    const resolvedName = (name || '').trim() || email.split('@')[0] || 'User';
     if (isFirebaseConfigured && auth) {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: name });
+      await updateProfile(cred.user, { displayName: resolvedName });
       const profileData = {
-        name,
+        name: resolvedName,
         email,
         currency: '₹',
         monthlyIncome: Number(monthlyIncome) || 0,
@@ -150,7 +151,7 @@ export function AuthProvider({ children }) {
         email,
         uid: cred.user.uid,
         phoneNumber,
-        name,
+        name: resolvedName,
       });
       upsertUserProfile(cred.user.uid, profileData).catch(() => {});
       setUser(cred.user);
@@ -159,13 +160,13 @@ export function AuthProvider({ children }) {
     }
 
     // Demo Mode Registration
-    const demoUser = { uid: `local-${Date.now()}`, displayName: name, email, photoURL: '', phoneNumber: phoneNumber || '' };
-    const demoProfile = { name, email, currency: '₹', monthlyIncome: Number(monthlyIncome) || 0, photoURL: '', phoneNumber: phoneNumber || '' };
+    const demoUser = { uid: `local-${Date.now()}`, displayName: resolvedName, email, photoURL: '', phoneNumber: phoneNumber || '' };
+    const demoProfile = { name: resolvedName, email, currency: '₹', monthlyIncome: Number(monthlyIncome) || 0, photoURL: '', phoneNumber: phoneNumber || '' };
     markAccountRegistered({
       email,
       uid: demoUser.uid,
       phoneNumber,
-      name,
+      name: resolvedName,
     });
     localStorage.setItem('moneymap_demo_registered', 'true');
     localStorage.setItem('moneymap_demo_session', JSON.stringify({ user: demoUser, profile: demoProfile }));
@@ -204,7 +205,7 @@ export function AuthProvider({ children }) {
    * Google Sign-In for Existing Users (Login Page)
    * Uses native Credential Manager on Android, popup on web
    */
-  const signInWithGoogleLogin = async () => {
+  const signInWithGoogleLogin = async (phoneNumber = '') => {
     if (!auth) {
       throw new Error('Google Authentication service is not initialized');
     }
@@ -231,6 +232,7 @@ export function AuthProvider({ children }) {
     const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
     const cachedProfile = loadLocal(getUserProfileKey(cred.user.uid), null);
     const hasPhoneCached = Boolean(cachedProfile && cachedProfile.phoneNumber);
+    let existingProfile = cachedProfile;
 
     if (additionalInfo?.isNewUser || (!isRegisteredLocal && !hasPhoneCached)) {
       // Check remote Firestore as last resort
@@ -244,23 +246,43 @@ export function AuthProvider({ children }) {
         err.email = cred.user.email;
         throw err;
       }
+      existingProfile = existing;
     }
 
-    const profileData = cachedProfile || {
+    const resolvedPhone = phoneNumber || existingProfile?.phoneNumber || '';
+    const profileData = {
       name: cred.user.displayName || 'User',
       email: cred.user.email,
       photoURL: cred.user.photoURL || '',
       currency: '₹',
       monthlyIncome: 0,
-      phoneNumber: '',
+      ...(existingProfile || {}),
+      phoneNumber: resolvedPhone,
     };
+
+    markAccountRegistered({
+      email: cred.user.email,
+      uid: cred.user.uid,
+      phoneNumber: resolvedPhone,
+      name: profileData.name,
+    });
+    saveLocal(getUserProfileKey(cred.user.uid), { ...profileData, uid: cred.user.uid });
 
     setUser(cred.user);
     setProfile(profileData);
 
-    // Sync Firestore in background
+    // Sync entered phone number / fresh Firestore profile in background
+    if (phoneNumber && phoneNumber !== existingProfile?.phoneNumber) {
+      upsertUserProfile(cred.user.uid, { phoneNumber }).catch(() => {});
+    }
     getUserProfile(cred.user.uid).then((fresh) => {
-      if (fresh) setProfile((prev) => ({ ...prev, ...fresh }));
+      if (fresh) {
+        setProfile((prev) => ({
+          ...prev,
+          ...fresh,
+          phoneNumber: phoneNumber || fresh.phoneNumber || prev?.phoneNumber || '',
+        }));
+      }
     }).catch(() => {});
 
     return { user: cred.user, profile: profileData };
