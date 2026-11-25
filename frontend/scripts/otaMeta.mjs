@@ -94,6 +94,6 @@ export function computeWebBuildMeta(frontendDir) {
   return {
     version: `1.0.${shortHash}`,
     buildTime,
-    minNativeVersion: 1,
+    minNativeVersion: 2,
   };
 }

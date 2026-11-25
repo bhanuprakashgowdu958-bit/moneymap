@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +50,8 @@ async function main() {
     compressionOptions: { level: 9 },
   });
 
+  const checksum = crypto.createHash('sha256').update(zipBuffer).digest('hex');
+
   const bundlePath = path.join(distDir, BUNDLE_FILENAME);
   fs.writeFileSync(bundlePath, zipBuffer);
 
@@ -57,6 +60,7 @@ async function main() {
     buildTime: meta.buildTime,
     minNativeVersion: meta.minNativeVersion,
     url: `${baseUrl}/${BUNDLE_FILENAME}`,
+    checksum,
     apkUrl,
     notes: process.env.OTA_NOTES || 'Latest improvements and bug fixes are ready.',
     forceUpdate: process.env.OTA_FORCE_UPDATE === 'true',

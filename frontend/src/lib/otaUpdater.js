@@ -1,7 +1,7 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { isNativeAndroid, LIVE_API_ORIGIN } from './nativeBridge';
 
-export const NATIVE_APP_SCHEMA = 1;
+export const NATIVE_APP_SCHEMA = 2;
 export const OTA_READY_EVENT = 'moneymap:ota-ready';
 
 export function getCurrentWebVersion() {
@@ -60,7 +60,7 @@ export async function checkAndPrepareOtaUpdate() {
   }
 
   const minNative = Number(remote.minNativeVersion || 1);
-  if (minNative > NATIVE_APP_SCHEMA) {
+  if (minNative > NATIVE_APP_SCHEMA || !remote.checksum) {
     return { status: 'native_required', remote, currentVersion };
   }
 
@@ -70,19 +70,25 @@ export async function checkAndPrepareOtaUpdate() {
     (b) => b.version === remote.version && (b.status === 'success' || b.status === 'pending')
   );
 
-  const bundle =
-    cachedBundle ||
-    (await CapacitorUpdater.download({
-      url: remote.url,
-      version: remote.version,
-    }));
+  try {
+    const bundle =
+      cachedBundle ||
+      (await CapacitorUpdater.download({
+        url: remote.url,
+        version: remote.version,
+        checksum: remote.checksum,
+      }));
 
-  return {
-    status: 'ready',
-    bundle,
-    remote,
-    currentVersion,
-  };
+    return {
+      status: 'ready',
+      bundle,
+      remote,
+      currentVersion,
+    };
+  } catch (err) {
+    console.warn('OTA bundle download failed, falling back to APK prompt:', err);
+    return { status: 'native_required', remote, currentVersion };
+  }
 }
 
 /**
