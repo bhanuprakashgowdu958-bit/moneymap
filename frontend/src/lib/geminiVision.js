@@ -1,6 +1,6 @@
-// Optional Google Gemini 2.0 Flash Vision integration for receipt & payment analysis
+// Optional Google Gemini Vision integration for receipt & payment analysis
 // Provides near 100% human-grade comprehension on receipts, bills, handwritten invoices, and UPI screenshots.
-// Automatically used when VITE_GEMINI_API_KEY is configured or stored in localStorage ('gemini_api_key').
+// Automatically used when VITE_GEMINI_API_KEY is configured.
 
 /**
  * Convert a File or Blob into base64 string
@@ -25,7 +25,6 @@ function fileToBase64(file) {
 export async function scanReceiptWithGemini(file) {
   const apiKey =
     (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) ||
-    (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('gemini_api_key')) ||
     '';
 
   if (!apiKey || apiKey.trim().length === 0) {

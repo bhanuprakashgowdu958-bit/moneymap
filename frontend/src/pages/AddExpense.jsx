@@ -48,8 +48,7 @@ export default function AddExpense() {
   const fileRef = useRef();
 
   const hasGeminiKey = Boolean(
-    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) ||
-    (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('gemini_api_key'))
+    typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY
   );
 
   const [form, setForm] = useState({
