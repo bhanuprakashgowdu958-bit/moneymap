@@ -9,6 +9,8 @@ import {
 } from '../lib/otaUpdater';
 
 const CHECK_COOLDOWN_MS = 60 * 1000;
+const DEFAULT_APK_URL =
+  'https://github.com/bhanuprakashgowdu958-bit/moneymap/releases/latest/download/MoneyMap.apk';
 
 export default function AppUpdatePrompt() {
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -151,13 +153,25 @@ export default function AppUpdatePrompt() {
               )}
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => setDismissedVersion(remoteVersion)}
-              className="btn-primary w-full text-sm"
-            >
-              Got It
-            </button>
+            <>
+              <a
+                href={updateInfo.remote?.apkUrl || DEFAULT_APK_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary flex-1 flex items-center justify-center gap-2 text-sm text-center"
+              >
+                Download Update
+              </a>
+              {!isForce && (
+                <button
+                  type="button"
+                  onClick={() => setDismissedVersion(remoteVersion)}
+                  className="btn-secondary text-sm"
+                >
+                  Later
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

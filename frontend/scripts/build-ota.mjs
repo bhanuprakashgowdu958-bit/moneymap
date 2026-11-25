@@ -36,6 +36,9 @@ async function main() {
     process.env.VITE_API_BASE_URL ||
     'https://moneymap-pl9w.vercel.app'
   ).replace(/\/+$/, '');
+  const apkUrl =
+    process.env.OTA_APK_URL ||
+    'https://github.com/bhanuprakashgowdu958-bit/moneymap/releases/latest/download/MoneyMap.apk';
 
   const zip = new JSZip();
   addDirToZip(zip, distDir, distDir);
@@ -54,6 +57,7 @@ async function main() {
     buildTime: meta.buildTime,
     minNativeVersion: meta.minNativeVersion,
     url: `${baseUrl}/${BUNDLE_FILENAME}`,
+    apkUrl,
     notes: process.env.OTA_NOTES || 'Latest improvements and bug fixes are ready.',
     forceUpdate: process.env.OTA_FORCE_UPDATE === 'true',
   };
