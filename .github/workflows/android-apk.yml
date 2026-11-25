@@ -140,11 +140,10 @@ jobs:
           WORKFLOW="android-apk.yml"
           KEEP=2
 
-          # Fetch all run IDs for this workflow, sorted newest first, skip the first KEEP
+          # Fetch all run IDs sorted newest first, skip the first KEEP=2
           RUN_IDS=$(gh api \
             "repos/$REPO/actions/workflows/$WORKFLOW/runs?per_page=100" \
-            --jq '.workflow_runs | sort_by(.created_at) | reverse | .[$ENV.KEEP:] | .[].id' \
-            --env KEEP="$KEEP")
+            --jq '.workflow_runs | sort_by(.created_at) | reverse | .[2:] | .[].id')
 
           if [ -z "$RUN_IDS" ]; then
             echo "Nothing to delete — fewer than $KEEP runs exist."
