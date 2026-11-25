@@ -6,17 +6,61 @@ import {
   checkAndPrepareOtaUpdate,
   notifyOtaAppReady,
   OTA_READY_EVENT,
+  stageOtaForNextRestart,
 } from '../lib/otaUpdater';
 
-const CHECK_COOLDOWN_MS = 60 * 1000;
+const AUTO_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours between silent background checks
+const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours after tapping "Later"
+const LAST_CHECK_KEY = 'moneymap_ota_last_check';
+const DISMISSED_KEY = 'moneymap_ota_dismissed';
 const DEFAULT_APK_URL =
   'https://github.com/bhanuprakashgowdu958-bit/moneymap/releases/latest/download/MoneyMap.apk';
+
+function isSnoozed(version) {
+  if (!version) return false;
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== version) return false;
+    return Date.now() - Number(parsed.dismissedAt || 0) < SNOOZE_DURATION_MS;
+  } catch {
+    return false;
+  }
+}
+
+function saveSnooze(version) {
+  if (!version) return;
+  try {
+    localStorage.setItem(
+      DISMISSED_KEY,
+      JSON.stringify({ version, dismissedAt: Date.now() })
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function readLastCheckTime() {
+  try {
+    return Number(localStorage.getItem(LAST_CHECK_KEY) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function saveLastCheckTime(ts) {
+  try {
+    localStorage.setItem(LAST_CHECK_KEY, String(ts));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
 
 export default function AppUpdatePrompt() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [applying, setApplying] = useState(false);
   const [dismissedVersion, setDismissedVersion] = useState('');
-  const lastCheckRef = useRef(0);
   const checkingRef = useRef(false);
 
   useEffect(() => {
@@ -25,15 +69,30 @@ export default function AppUpdatePrompt() {
     // 1. Confirm current bundle booted cleanly BEFORE any network requests
     notifyOtaAppReady();
 
-    const runCheck = async () => {
+    const runSilentCheck = async () => {
       const now = Date.now();
-      if (checkingRef.current || now - lastCheckRef.current < CHECK_COOLDOWN_MS) return;
+      const lastCheck = readLastCheckTime();
+      if (checkingRef.current || now - lastCheck < AUTO_CHECK_INTERVAL_MS) return;
+
       checkingRef.current = true;
-      lastCheckRef.current = now;
       try {
         const result = await checkAndPrepareOtaUpdate();
-        if (result.status === 'ready' || result.status === 'native_required') {
-          setUpdateInfo(result);
+        saveLastCheckTime(now);
+
+        if (result.status === 'ready') {
+          const isForced = Boolean(result.remote?.forceUpdate);
+          if (isForced) {
+            setUpdateInfo(result);
+          } else if (result.bundle?.id) {
+            // Normal web updates install silently on the next app background/restart — 0 popups
+            await stageOtaForNextRestart(result.bundle.id);
+          }
+        } else if (result.status === 'native_required') {
+          const remoteVer = result.remote?.version || '';
+          const isForced = Boolean(result.remote?.forceUpdate);
+          if (isForced || !isSnoozed(remoteVer)) {
+            setUpdateInfo(result);
+          }
         }
       } catch {
         // Silent fail for automatic background checks (offline/poor network)
@@ -42,17 +101,17 @@ export default function AppUpdatePrompt() {
       }
     };
 
-    // Initial check immediately on launch so critical fixes arrive before login
-    runCheck();
+    // Check quietly on startup (respecting the 4-hour interval)
+    runSilentCheck();
 
-    // Re-check when returning to app from background
+    // Re-check only if returning to foreground after the 4-hour interval
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        runCheck();
+        runSilentCheck();
       }
     };
 
-    // Allow manual check from Settings to open this prompt immediately
+    // Allow manual "Check for Updates" from Settings to show the prompt immediately
     const handleManualTrigger = (e) => {
       const result = e.detail;
       if (result && (result.status === 'ready' || result.status === 'native_required')) {
@@ -77,6 +136,12 @@ export default function AppUpdatePrompt() {
   if (!isForce && dismissedVersion && dismissedVersion === remoteVersion) {
     return null;
   }
+
+  const handleDismiss = () => {
+    saveSnooze(remoteVersion);
+    setDismissedVersion(remoteVersion);
+    setUpdateInfo(null);
+  };
 
   const handleApply = async () => {
     if (updateInfo.status !== 'ready' || !updateInfo.bundle?.id) return;
@@ -105,20 +170,20 @@ export default function AppUpdatePrompt() {
             <h3 id="ota-update-title" className="text-base font-bold text-gray-900">
               {updateInfo.status === 'native_required'
                 ? 'New App Version Required'
-                : 'New Update Available'}
+                : 'New Update Ready'}
             </h3>
             <p className="text-xs text-gray-500 mt-1 leading-relaxed">
               {updateInfo.status === 'native_required'
-                ? 'A major MoneyMap update is ready. Please install the latest APK to continue getting new features.'
+                ? 'A major MoneyMap update is ready. Install the latest APK once to get all new features and improvements.'
                 : updateInfo.remote?.notes ||
-                  'A newer version of MoneyMap is ready with the latest improvements.'}
+                  'All latest improvements are downloaded and ready to apply in one tap.'}
             </p>
           </div>
         </div>
 
         {updateInfo.status === 'ready' && (
           <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3 py-2 text-[11px] text-blue-800">
-            Updates inside MoneyMap in ~1 second. Your data and login stay safe.
+            Applies all latest updates in ~1 second. Your data and login stay safe.
           </div>
         )}
 
@@ -143,7 +208,7 @@ export default function AppUpdatePrompt() {
               {!isForce && (
                 <button
                   type="button"
-                  onClick={() => setDismissedVersion(remoteVersion)}
+                  onClick={handleDismiss}
                   disabled={applying}
                   className="btn-secondary text-sm"
                 >
@@ -157,6 +222,7 @@ export default function AppUpdatePrompt() {
                 href={updateInfo.remote?.apkUrl || DEFAULT_APK_URL}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => saveSnooze(remoteVersion)}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 text-sm text-center"
               >
                 Download Update
@@ -164,7 +230,7 @@ export default function AppUpdatePrompt() {
               {!isForce && (
                 <button
                   type="button"
-                  onClick={() => setDismissedVersion(remoteVersion)}
+                  onClick={handleDismiss}
                   className="btn-secondary text-sm"
                 >
                   Later

@@ -92,6 +92,19 @@ export async function checkAndPrepareOtaUpdate() {
 }
 
 /**
+ * Stages a downloaded bundle to activate automatically on the next
+ * app background or restart without interrupting the user with a popup.
+ */
+export async function stageOtaForNextRestart(bundleId) {
+  if (!isNativeAndroid() || !bundleId) return;
+  try {
+    await CapacitorUpdater.next({ id: bundleId });
+  } catch (err) {
+    console.warn('OTA next() stage notice:', err);
+  }
+}
+
+/**
  * Switches the WebView immediately to the downloaded bundle and reloads the app.
  */
 export async function applyOtaUpdate(bundleId) {
