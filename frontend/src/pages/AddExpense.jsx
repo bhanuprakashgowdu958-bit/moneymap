@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { addExpense } from '../lib/firestore';
+import { addExpense, getBudgets, getMonthlyStats } from '../lib/firestore';
+import { buildBudgetAlert } from '../lib/budgetAlerts';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { parseExpenseText } from '../lib/smsParser';
 import { scanReceiptImage } from '../lib/ocrScanner';
@@ -60,6 +61,27 @@ export default function AddExpense() {
     note:          '',
     isRecurring:   false,
   });
+  const [budgetMap, setBudgetMap] = useState({});
+  const [spentMap, setSpentMap] = useState({});
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const d = new Date(form.date || initialDate);
+    if (isNaN(d.getTime())) return;
+    const m = d.getMonth() + 1;
+    const y = d.getFullYear();
+
+    Promise.all([getBudgets(user.uid, m, y), getMonthlyStats(user.uid, m, y)])
+      .then(([buds, stats]) => {
+        const bMap = {};
+        buds.forEach((b) => { bMap[b.category] = b; });
+        const sMap = {};
+        stats.stats.forEach((s) => { sMap[s._id] = s.total; });
+        setBudgetMap(bMap);
+        setSpentMap(sMap);
+      })
+      .catch(() => {});
+  }, [user, form.date, initialDate]);
 
   // Handle Magic SMS / Smart Text input
   const handleMagicTextChange = (text) => {
@@ -200,7 +222,19 @@ export default function AddExpense() {
         receiptPublicId,
       });
 
-      toast.success('Expense added! 💸');
+      const postAlert = buildBudgetAlert(
+        budgetMap[form.category],
+        (spentMap[form.category] || 0) + numAmount,
+        currency
+      );
+      if (postAlert) {
+        toast(postAlert.message, {
+          icon: postAlert.level === 'over' ? '🚨' : '⚠️',
+          duration: 6000,
+        });
+      } else {
+        toast.success('Expense added! 💸');
+      }
       navigate('/expenses');
     } catch (err) {
       toast.dismiss('receipt');
@@ -211,6 +245,12 @@ export default function AddExpense() {
   };
 
   const selectedCat = CATEGORIES[form.category];
+  const pendingAmount = Number(sanitizeAmount(form.amount)) || 0;
+  const projectedAlert = buildBudgetAlert(
+    budgetMap[form.category],
+    (spentMap[form.category] || 0) + pendingAmount,
+    currency
+  );
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 sm:space-y-6">
@@ -560,6 +600,25 @@ export default function AddExpense() {
             <p className="text-xs text-gray-400">Mark if this auto-debits every month (Netflix, Rent, Wi-Fi)</p>
           </div>
         </label>
+
+        {/* Live Budget Warning */}
+        {projectedAlert && (
+          <div
+            className={`rounded-xl p-3 border text-xs flex items-start gap-2 ${
+              projectedAlert.level === 'over' || projectedAlert.level === 'reached'
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}
+          >
+            <span className="text-base leading-none">{projectedAlert.level === 'over' ? '🚨' : '⚠️'}</span>
+            <div>
+              <p className="font-bold">
+                {projectedAlert.level === 'over' ? 'Over Monthly Budget!' : 'Budget Threshold Alert'}
+              </p>
+              <p className="mt-0.5">{projectedAlert.message}</p>
+            </div>
+          </div>
+        )}
 
         {/* Submit Buttons */}
         <div className="flex gap-3 pt-2">

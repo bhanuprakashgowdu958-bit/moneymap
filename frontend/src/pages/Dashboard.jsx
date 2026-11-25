@@ -4,8 +4,8 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useAuth } from '../context/AuthContext';
 import { getExpenses, getBudgets } from '../lib/firestore';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
+import { buildBudgetAlert } from '../lib/budgetAlerts';
 import SpendingCalendar from '../components/SpendingCalendar';
-import toast from 'react-hot-toast';
 
 const RADIAN = Math.PI / 180;
 const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
@@ -156,6 +156,12 @@ export default function Dashboard() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
+  const activeAlerts = budgets
+    .map((b) => buildBudgetAlert(b, b.spent, currency))
+    .filter(Boolean)
+    .sort((a, b) => b.percentage - a.percentage);
+  const hasOverBudget = activeAlerts.some((a) => a.level === 'over' || a.level === 'reached');
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -167,6 +173,56 @@ export default function Dashboard() {
           <span>➕</span> Add Expense
         </Link>
       </div>
+
+      {/* Live Budget Alert Banner */}
+      {activeAlerts.length > 0 && (
+        <div
+          className={`rounded-2xl p-3.5 sm:p-4 border shadow-sm ${
+            hasOverBudget
+              ? 'bg-red-50/90 border-red-200 text-red-900'
+              : 'bg-amber-50/90 border-amber-200 text-amber-900'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="space-y-1 min-w-0">
+              <p className="text-xs sm:text-sm font-bold flex items-center gap-1.5">
+                <span>{hasOverBudget ? '🚨' : '⚠️'}</span>
+                <span>{hasOverBudget ? 'Budget Limit Alert' : 'Approaching Budget Limit'}</span>
+              </p>
+              <div className="space-y-0.5">
+                {activeAlerts.slice(0, 2).map((alert) => (
+                  <p key={alert.category} className="text-xs leading-relaxed">
+                    {alert.icon} <strong>{alert.label}:</strong> {alert.message}
+                  </p>
+                ))}
+                {activeAlerts.length > 2 && (
+                  <p className="text-[11px] opacity-80">
+                    +{activeAlerts.length - 2} more category alert(s)
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Link
+                to="/budgets"
+                className={`text-xs font-semibold px-3 py-2 rounded-xl border transition-colors ${
+                  hasOverBudget
+                    ? 'bg-white border-red-200 text-red-700 hover:bg-red-100'
+                    : 'bg-white border-amber-200 text-amber-800 hover:bg-amber-100'
+                }`}
+              >
+                View Budgets
+              </Link>
+              <Link
+                to="/settings#app-guard"
+                className="text-xs font-semibold px-3 py-2 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+              >
+                📱 App-Open Alert
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

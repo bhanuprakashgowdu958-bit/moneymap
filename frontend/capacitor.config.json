@@ -1,0 +1,8 @@
+{
+  "appId": "com.moneymap.app",
+  "appName": "MoneyMap",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

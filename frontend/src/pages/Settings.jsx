@@ -1,8 +1,20 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { getOrCreateWebhookToken, regenerateWebhookToken, isDemoUser } from '../lib/firestore';
 import { downloadMacroDroidGuidePdf, downloadIosGuidePdf } from '../lib/macrodroidPdf';
+import { CATEGORIES } from '../lib/constants';
+import {
+  isNativeAndroid,
+  getNativeStatus,
+  syncNativeConfig,
+  setNativeAutoTrack,
+  setNativeAppGuard,
+  openNotificationAccessSettings,
+  openUsageAccessSettings,
+  openAppInfoSettings,
+  requestNativeNotifications,
+} from '../lib/nativeBridge';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -18,25 +30,90 @@ export default function Settings() {
   const [webhookToken, setWebhookToken] = useState('');
   const [loadingWebhook, setLoadingWebhook] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testingGuard, setTestingGuard] = useState(false);
+  const [guardCategory, setGuardCategory] = useState('food-delivery');
+  const [guardTab, setGuardTab] = useState('ios');
   const [guideTab, setGuideTab] = useState('ios');
+  const [showAdvancedAutomation, setShowAdvancedAutomation] = useState(false);
+  const [nativeStatus, setNativeStatus] = useState(null);
   const fileInputRef = useRef(null);
+  const onAndroidApp = isNativeAndroid();
+
+  const refreshNativeStatus = useCallback(() => {
+    if (!onAndroidApp) return;
+    getNativeStatus().then(setNativeStatus).catch(() => {});
+  }, [onAndroidApp]);
 
   useEffect(() => {
     if (user?.uid && !isDemoUser(user.uid)) {
       getOrCreateWebhookToken(user.uid)
-        .then((tok) => { if (tok) setWebhookToken(tok); })
+        .then((tok) => {
+          if (tok) {
+            setWebhookToken(tok);
+            if (onAndroidApp) syncNativeConfig(tok);
+          }
+        })
         .catch(() => {});
     }
-  }, [user]);
+  }, [user, onAndroidApp]);
 
+  useEffect(() => {
+    if (!onAndroidApp) return;
+    refreshNativeStatus();
+    const onResume = () => refreshNativeStatus();
+    window.addEventListener('focus', onResume);
+    document.addEventListener('visibilitychange', onResume);
+    return () => {
+      window.removeEventListener('focus', onResume);
+      document.removeEventListener('visibilitychange', onResume);
+    };
+  }, [onAndroidApp, refreshNativeStatus]);
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = webhookToken
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook?token=${webhookToken}`
+    ? `${origin}/api/webhook?token=${webhookToken}`
+    : '';
+  const guardTextUrl = webhookToken
+    ? `${origin}/api/budget-check?token=${webhookToken}&category=${guardCategory}&format=text`
+    : '';
+  const guardJsonUrl = webhookToken
+    ? `${origin}/api/budget-check?token=${webhookToken}&category=${guardCategory}`
     : '';
 
   const handleCopyWebhook = () => {
     if (!webhookUrl) return;
     navigator.clipboard.writeText(webhookUrl);
     toast.success('Personal Webhook URL copied! 📋');
+  };
+
+  const handleCopyGuardUrl = () => {
+    if (!guardTextUrl) return;
+    navigator.clipboard.writeText(guardTextUrl);
+    toast.success('App-Open Guard URL copied! 🛡️');
+  };
+
+  const handleTestGuard = async () => {
+    if (!guardJsonUrl) return;
+    setTestingGuard(true);
+    try {
+      const res = await fetch(guardJsonUrl);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        toast.error(data?.error || 'Budget check works once deployed to Vercel.');
+        return;
+      }
+      if (!data.hasBudget) {
+        toast(`No monthly budget set for ${data.label} yet. Set one on the Budgets page!`, { icon: '🎯' });
+      } else if (data.shouldAlert) {
+        toast(data.message, { icon: data.overLimit ? '🚨' : '⚠️', duration: 6000 });
+      } else {
+        toast.success(data.message);
+      }
+    } catch {
+      toast.error('Budget check endpoint requires Vercel deployment (or vercel dev).');
+    } finally {
+      setTestingGuard(false);
+    }
   };
 
   const handleRegenerateWebhook = async () => {
@@ -68,6 +145,9 @@ export default function Settings() {
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
         toast.success(`Test logged: ${data.expense?.title} (${currency}${data.expense?.amount}) 🎉`);
+        if (data.budgetAlert) {
+          toast(data.budgetAlert, { icon: data.budget?.overLimit ? '🚨' : '⚠️', duration: 6000 });
+        }
       } else {
         toast.error(data?.error || 'Webhook test works once deployed to Vercel.');
       }
@@ -254,8 +334,183 @@ export default function Settings() {
         </form>
       </div>
 
-      {/* Real-Time Phone SMS / UPI Webhook */}
-      <div className="card border border-emerald-500/20 bg-gradient-to-br from-white to-emerald-500/5">
+      {/* Native Android 1-Tap Auto-Track & Guard (inside Android APK) */}
+      {onAndroidApp ? (
+        <div id="app-guard" className="card border border-emerald-500/25 bg-gradient-to-br from-white to-emerald-500/5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xl flex-shrink-0">⚡</span>
+              <h2 className="text-base font-semibold text-gray-900 truncate">Auto-Track & Food Guard</h2>
+            </div>
+            <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800 border border-emerald-300 flex-shrink-0">
+              1-Tap Native
+            </span>
+          </div>
+
+          {isDemoUser(user?.uid) ? (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              Sign in with your MoneyMap account to sync auto-tracked payments to your profile.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Toggle 1: Notification Auto-Track */}
+              <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Auto-Track UPI & Bank Alerts</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Logs GPay, PhonePe, Paytm & Bank debit notifications automatically
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await requestNativeNotifications();
+                      const next = !nativeStatus?.autoTrackEnabled;
+                      await setNativeAutoTrack(next);
+                      await syncNativeConfig(webhookToken);
+                      refreshNativeStatus();
+                      if (next && !nativeStatus?.hasNotificationAccess) {
+                        openNotificationAccessSettings();
+                      } else {
+                        toast.success(next ? 'Auto-Tracking enabled! ⚡' : 'Auto-Tracking paused');
+                      }
+                    }}
+                    className={`w-12 h-7 rounded-full transition-colors flex-shrink-0 p-0.5 ${
+                      nativeStatus?.autoTrackEnabled && nativeStatus?.hasNotificationAccess
+                        ? 'bg-emerald-600'
+                        : 'bg-gray-300'
+                    }`}
+                    aria-label="Toggle auto tracking"
+                  >
+                    <span
+                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                        nativeStatus?.autoTrackEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {!nativeStatus?.hasNotificationAccess ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 space-y-2">
+                    <p className="text-xs text-amber-900 font-medium">
+                      1 step left: Allow MoneyMap under Android <strong>Notification Access</strong>.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={openNotificationAccessSettings}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                      >
+                        Open Notification Access →
+                      </button>
+                      {nativeStatus?.sdkInt >= 33 && (
+                        <button
+                          type="button"
+                          onClick={openAppInfoSettings}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900"
+                        >
+                          Greyed out? App Info (⋮ → Allow restricted)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-emerald-700 font-semibold">✅ Notification Access Active</p>
+                )}
+              </div>
+
+              {/* Toggle 2: Food App Budget Guard */}
+              <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Swiggy / Zomato Budget Guard</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Warns you the moment you open food or delivery apps over budget
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await requestNativeNotifications();
+                      const next = !nativeStatus?.appGuardEnabled;
+                      if (next && !nativeStatus?.hasUsageAccess) {
+                        await setNativeAppGuard(true);
+                        openUsageAccessSettings();
+                        return;
+                      }
+                      await syncNativeConfig(webhookToken);
+                      await setNativeAppGuard(next);
+                      refreshNativeStatus();
+                      toast.success(next ? 'Food App Guard active! 🛡️' : 'Food App Guard paused');
+                    }}
+                    className={`w-12 h-7 rounded-full transition-colors flex-shrink-0 p-0.5 ${
+                      nativeStatus?.appGuardEnabled && nativeStatus?.hasUsageAccess
+                        ? 'bg-blue-600'
+                        : 'bg-gray-300'
+                    }`}
+                    aria-label="Toggle app open budget guard"
+                  >
+                    <span
+                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                        nativeStatus?.appGuardEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {!nativeStatus?.hasUsageAccess ? (
+                  <button
+                    type="button"
+                    onClick={openUsageAccessSettings}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200"
+                  >
+                    Allow Usage Access (to detect Swiggy / Zomato) →
+                  </button>
+                ) : (
+                  <p className="text-xs text-emerald-700 font-semibold">✅ Usage Access Granted</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div id="app-guard" className="space-y-4">
+          {/* Android APK Zero-Setup Banner for Web Users */}
+          <div className="card border border-blue-200 bg-gradient-to-br from-white to-blue-50/70">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                  <span>📲</span> MoneyMap Android App (Zero-Setup Auto-Track)
+                </h2>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  Want automatic UPI expense tracking and Swiggy/Zomato budget alerts without setting up MacroDroid? Install the MoneyMap Android APK and turn it on in 1 tap.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <a
+                href="https://github.com/bhanuprakashgowdu958-bit/moneymap/actions/workflows/android-apk.yml"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-1.5"
+              >
+                ⬇️ Get Android APK Build
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowAdvancedAutomation((v) => !v)}
+                className="btn-secondary text-xs py-2 px-3.5"
+              >
+                {showAdvancedAutomation ? 'Hide Manual Automation ▲' : 'Advanced: MacroDroid / iOS Shortcuts ▼'}
+              </button>
+            </div>
+          </div>
+
+          {showAdvancedAutomation && (
+            <>
+              {/* Real-Time Phone SMS / UPI Webhook */}
+              <div className="card border border-emerald-500/20 bg-gradient-to-br from-white to-emerald-500/5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="text-xl">📱</span>
@@ -359,6 +614,7 @@ export default function Settings() {
                   <li>Choose <strong>Message</strong> → Message Contains <code className="bg-gray-100 px-1 rounded">debited</code> → <strong>Run Immediately</strong>.</li>
                   <li>Add action: <strong>Get Contents of URL</strong> → paste your Webhook URL above.</li>
                   <li>Set Method to <strong>POST</strong>, Request Body to <strong>JSON</strong>, key <code className="bg-gray-100 px-1 rounded">text</code> = <strong>Shortcut Input</strong>.</li>
+                  <li>Optional: Read <code className="bg-gray-100 px-1 rounded">budgetAlert</code> from the response and show a notification if not empty.</li>
                 </ol>
               ) : (
                 <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
@@ -366,12 +622,125 @@ export default function Settings() {
                   <li>Trigger: <strong>SMS Received</strong> (contains <code className="bg-gray-100 px-1 rounded">debited</code> or <code className="bg-gray-100 px-1 rounded">UPI</code>).</li>
                   <li>Action: <strong>HTTP Request (POST)</strong> → paste your Webhook URL above.</li>
                   <li>Content-Type <code className="bg-gray-100 px-1 rounded">text/plain</code>, Body: <code className="bg-gray-100 px-1 rounded">[sms_message]</code>.</li>
+                  <li>The response includes <code className="bg-gray-100 px-1 rounded">budgetAlert</code> whenever that category crosses 80% or 100%.</li>
                 </ol>
               )}
             </div>
           </div>
         )}
       </div>
+
+      {/* App-Open Pre-Order Budget Guard */}
+      <div className="card border border-amber-500/25 bg-gradient-to-br from-white to-amber-500/5">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl flex-shrink-0">🛡️</span>
+            <h2 className="text-base font-semibold text-gray-900 truncate">App-Open Budget Guard</h2>
+          </div>
+          <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 border border-amber-300 flex-shrink-0">
+            Pre-Order Alert
+          </span>
+        </div>
+        <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+          Warn yourself <strong>before</strong> ordering when you open Swiggy, Zomato, Blinkit, or shopping apps while a category is near or over its monthly limit.
+        </p>
+
+        {isDemoUser(user?.uid) ? (
+          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+            Sign in with a real Google/Email account to activate your App-Open Guard URL.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="label text-xs">Category to Monitor</label>
+              <select
+                className="input-field text-sm py-2.5"
+                value={guardCategory}
+                onChange={(e) => setGuardCategory(e.target.value)}
+              >
+                {Object.entries(CATEGORIES)
+                  .filter(([k]) => k !== 'other')
+                  .map(([k, v]) => (
+                    <option key={k} value={k}>{v.icon} {v.label}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label text-xs">App-Open Alert Check URL (GET)</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={guardTextUrl || 'Generating...'}
+                  className="input-field min-w-0 flex-1 text-xs font-mono bg-gray-50 text-gray-700"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyGuardUrl}
+                  disabled={!guardTextUrl}
+                  className="btn-primary text-xs whitespace-nowrap px-3.5 flex-shrink-0"
+                >
+                  📋 Copy
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
+                <button
+                  type="button"
+                  onClick={handleTestGuard}
+                  disabled={testingGuard || !guardJsonUrl}
+                  className="text-amber-700 hover:underline font-semibold py-1"
+                >
+                  {testingGuard ? 'Checking budget...' : '🔔 Test Budget Alert Now'}
+                </button>
+                <span className="text-[11px] text-gray-400">Returns empty if under 80%</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-3.5">
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setGuardTab('ios')}
+                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
+                    guardTab === 'ios' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                   iPhone (App Open)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGuardTab('android')}
+                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
+                    guardTab === 'android' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  🤖 Android (App Open)
+                </button>
+              </div>
+
+              {guardTab === 'ios' ? (
+                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                  <li>Open <strong>Shortcuts</strong> → <strong>Automation</strong> → <strong>+</strong> → choose <strong>App</strong>.</li>
+                  <li>Select <strong>Swiggy</strong>, <strong>Zomato</strong>, etc. → choose <strong>Is Opened</strong> → <strong>Run Immediately</strong>.</li>
+                  <li>Add <strong>Get Contents of URL</strong> (GET) with your Check URL above.</li>
+                  <li>Add <strong>If</strong> <em>Contents of URL</em> <strong>has any value</strong> → <strong>Show Notification</strong> (or <strong>Show Alert</strong>) with <em>Contents of URL</em>.</li>
+                </ol>
+              ) : (
+                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                  <li>In <strong>MacroDroid</strong>, tap <strong>Add Macro</strong> → Trigger: <strong>Applications → Application Launched</strong> (Swiggy, Zomato).</li>
+                  <li>Action 1: <strong>HTTP Request (GET)</strong> → paste Check URL above → save response to local string variable <code className="bg-gray-100 px-1 rounded">alert_msg</code>.</li>
+                  <li>Action 2: <strong>If</strong> <code className="bg-gray-100 px-1 rounded">[lv=alert_msg]</code> is not empty → <strong>Display Notification</strong> (or Popup Dialog) showing <code className="bg-gray-100 px-1 rounded">[lv=alert_msg]</code>.</li>
+                </ol>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <h2 className="text-base font-semibold text-gray-900 mb-4">Infrastructure & Cloud Services</h2>

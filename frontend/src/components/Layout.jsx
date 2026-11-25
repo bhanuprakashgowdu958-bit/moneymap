@@ -1,6 +1,9 @@
+import { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
+import { isNativeAndroid, syncNativeConfig } from '../lib/nativeBridge';
 
 const navItems = [
   { to: '/dashboard', icon: '📊', label: 'Home' },
@@ -11,8 +14,16 @@ const navItems = [
 ];
 
 export default function Layout({ children }) {
-  const { displayName, photoURL, isFirebaseConfigured, logout } = useAuth();
+  const { user, displayName, photoURL, isFirebaseConfigured, logout } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isNativeAndroid() && user?.uid && !isDemoUser(user.uid)) {
+      getOrCreateWebhookToken(user.uid)
+        .then((tok) => { if (tok) syncNativeConfig(tok); })
+        .catch(() => {});
+    }
+  }, [user]);
 
   const handleLogout = () => {
     logout();

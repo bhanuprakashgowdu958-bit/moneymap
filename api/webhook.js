@@ -1,12 +1,15 @@
 // Vercel Serverless Function: Real-Time Phone SMS / UPI Webhook
 // Receives bank debit SMS or UPI notification text from iOS Shortcuts / Android MacroDroid,
-// validates the user's personal webhook token, parses the expense, and saves it to Cloud Firestore.
+// validates the user's personal webhook token, parses the expense, saves it to Cloud Firestore,
+// and returns a budgetAlert if that category has crossed its monthly alert threshold or limit.
 
-const FIREBASE_PROJECT_ID = process.env.VITE_FIREBASE_PROJECT_ID || 'moneymap-5c848';
-const FIREBASE_API_KEY =
-  process.env.VITE_FIREBASE_API_KEY || 'AIzaSyC33XfyhiwYLeSEE5ERPhmBhtTxm_scSkg';
-
-const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+import {
+  FIREBASE_API_KEY,
+  FIRESTORE_BASE,
+  evaluateCategoryBudget,
+  getUserCurrency,
+  resolveTokenUid,
+} from './_budgetHelper.js';
 
 const CATEGORY_KEYWORDS = {
   'food-delivery': [
@@ -150,9 +153,11 @@ export default async function handler(req, res) {
   }
 
   const token = req.query?.token || req.headers['x-webhook-token'];
-  if (!token || typeof token !== 'string' || !token.startsWith('mm_')) {
-    return res.status(401).json({ error: 'Missing or invalid webhook token.' });
+  const tokenCheck = await resolveTokenUid(token);
+  if (tokenCheck.error) {
+    return res.status(tokenCheck.status).json({ error: tokenCheck.error });
   }
+  const uid = tokenCheck.uid;
 
   // Extract SMS/notification text from JSON body or plain string body
   let smsText = '';
@@ -167,28 +172,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Resolve token -> uid from Firestore
-    const tokenRes = await fetch(
-      `${FIRESTORE_BASE}/webhookTokens/${encodeURIComponent(token)}?key=${FIREBASE_API_KEY}`
-    );
-    if (!tokenRes.ok) {
-      const tokenErr = await tokenRes.json().catch(() => null);
-      if (tokenRes.status === 403) {
-        return res.status(403).json({
-          error:
-            tokenErr?.error?.message ||
-            'Firestore permission denied or Cloud Firestore API is not enabled.',
-        });
-      }
-      return res.status(401).json({ error: 'Webhook token not found or revoked.' });
-    }
-    const tokenDoc = await tokenRes.json();
-    const uid = tokenDoc?.fields?.uid?.stringValue;
-    if (!uid) {
-      return res.status(401).json({ error: 'Invalid webhook token mapping.' });
-    }
-
-    // 2. Parse the SMS/UPI text
+    // 1. Parse the SMS/UPI text
     const parsed = parseSmsExpense(smsText);
     if (!parsed) {
       return res.status(422).json({ error: 'Could not extract a valid debit amount from text.' });
@@ -197,7 +181,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, ignored: true, reason: parsed.reason });
     }
 
-    // 3. Write expense directly into users/{uid}/expenses via Firestore REST API
+    // 2. Write expense directly into users/{uid}/expenses via Firestore REST API
     const nowIso = new Date().toISOString();
     const firestorePayload = {
       fields: {
@@ -228,6 +212,22 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to save expense to Firestore.', details: errBody });
     }
 
+    // 3. Check monthly category budget so phone automation can alert immediately
+    let budget = null;
+    try {
+      const now = new Date();
+      const currency = await getUserCurrency(uid);
+      budget = await evaluateCategoryBudget(
+        uid,
+        parsed.category,
+        now.getMonth() + 1,
+        now.getFullYear(),
+        currency
+      );
+    } catch {
+      budget = null;
+    }
+
     return res.status(200).json({
       success: true,
       expense: {
@@ -236,6 +236,8 @@ export default async function handler(req, res) {
         category: parsed.category,
         paymentMethod: parsed.paymentMethod,
       },
+      budget,
+      budgetAlert: budget?.shouldAlert ? budget.message : null,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Internal server error' });
