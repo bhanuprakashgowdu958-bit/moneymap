@@ -44,7 +44,7 @@
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
   .pt-safe {
-    padding-top: env(safe-area-inset-top);
+    padding-top: max(0.625rem, env(safe-area-inset-top));
   }
   .badge-green {
     @apply bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full;

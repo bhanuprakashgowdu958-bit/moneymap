@@ -18,17 +18,15 @@ const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent
 
 function StatCard({ icon, label, value, sub, subColor = 'text-gray-500', bgColor = 'bg-blue-50' }) {
   return (
-    <div className="card p-3.5 sm:p-5 hover:shadow-card-hover transition-shadow duration-300 min-w-0">
+    <div className="card p-3.5 sm:p-5 hover:shadow-card-hover transition-shadow duration-300 min-w-0 flex flex-col justify-between">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs sm:text-sm text-gray-500 font-medium truncate">{label}</p>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 tabular-nums truncate">{value}</p>
-          {sub && <p className={`text-[11px] sm:text-xs mt-1 font-medium truncate ${subColor}`}>{sub}</p>}
-        </div>
-        <div className={`w-9 h-9 sm:w-11 sm:h-11 ${bgColor} rounded-xl flex items-center justify-center flex-shrink-0`}>
-          <span className="text-base sm:text-xl">{icon}</span>
+        <p className="text-[11px] sm:text-sm text-gray-500 font-medium leading-tight">{label}</p>
+        <div className={`w-7 h-7 sm:w-10 sm:h-10 ${bgColor} rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0`}>
+          <span className="text-sm sm:text-xl">{icon}</span>
         </div>
       </div>
+      <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1.5 tabular-nums truncate">{value}</p>
+      {sub && <p className={`text-[11px] sm:text-xs mt-1 font-medium leading-tight ${subColor}`}>{sub}</p>}
     </div>
   );
 }
@@ -304,9 +302,9 @@ export default function Dashboard() {
                 const pct = Math.min(b.percentage, 100);
                 return (
                   <div key={b.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5"><span>{cat?.icon}</span>{cat?.label}</span>
-                      <span className={`text-xs font-semibold ${b.percentage >= 100 ? 'text-red-600' : b.percentage >= 80 ? 'text-amber-600' : 'text-gray-500'}`}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5 min-w-0 truncate"><span className="flex-shrink-0">{cat?.icon}</span><span className="truncate">{cat?.label}</span></span>
+                      <span className={`text-xs font-semibold flex-shrink-0 tabular-nums ${b.percentage >= 100 ? 'text-red-600' : b.percentage >= 80 ? 'text-amber-600' : 'text-gray-500'}`}>
                         {formatCurrency(b.spent, currency)} / {formatCurrency(b.limit, currency)}
                       </span>
                     </div>

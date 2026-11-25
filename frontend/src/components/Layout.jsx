@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
 import { isNativeAndroid, syncNativeConfig } from '../lib/nativeBridge';
@@ -33,7 +33,7 @@ export default function Layout({ children }) {
   return (
     <div className="min-h-[100dvh] bg-gray-50 flex">
       {/* Sidebar - Desktop */}
-      <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r border-gray-100 fixed inset-y-0 left-0 z-10 shadow-sm">
+      <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r border-gray-100 fixed inset-y-0 left-0 z-10 shadow-sm overflow-y-auto">
         {/* Logo */}
         <div className="p-6 border-b border-gray-100">
           <div className="flex items-center gap-3">
@@ -121,7 +121,7 @@ export default function Layout({ children }) {
       {/* Main Content */}
       <main className="flex-1 min-w-0 lg:ml-64">
         {/* Top bar - mobile */}
-        <header className="lg:hidden bg-white/90 backdrop-blur-md border-b border-gray-100/80 px-4 py-2.5 pt-safe flex items-center justify-between sticky top-0 z-30 shadow-sm">
+        <header className="lg:hidden bg-white/95 backdrop-blur-md border-b border-gray-100 px-4 pb-2.5 pt-safe min-h-[56px] flex items-center justify-between sticky top-0 z-30 shadow-sm">
           <NavLink to="/dashboard" className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
               <span className="text-white text-sm font-bold">M</span>
@@ -138,10 +138,10 @@ export default function Layout({ children }) {
             to="/settings"
             aria-label="Open settings and profile"
             className={({ isActive }) =>
-              `flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-full border transition-all active:scale-95 ${
+              `flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full border transition-all active:scale-95 ${
                 isActive
                   ? 'bg-blue-50 border-blue-200 text-blue-700'
-                  : 'bg-gray-50/80 border-gray-200/80 text-gray-700 hover:bg-gray-100'
+                  : 'bg-gray-50/90 border-gray-200/80 text-gray-700 hover:bg-gray-100'
               }`
             }
           >
@@ -184,8 +184,8 @@ export default function Layout({ children }) {
               {({ isActive }) =>
                 item.highlight ? (
                   <>
-                    <span className="w-12 h-12 rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center text-xl group-active:scale-95 transition-transform ring-4 ring-white">
-                      {item.icon}
+                    <span className="w-12 h-12 rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30 flex items-center justify-center group-active:scale-95 transition-transform ring-4 ring-white">
+                      <Plus className="w-6 h-6 text-white stroke-[2.75]" />
                     </span>
                     <span className={`text-[10px] font-semibold mt-0.5 ${isActive ? 'text-blue-600' : 'text-gray-600'}`}>
                       {item.label}

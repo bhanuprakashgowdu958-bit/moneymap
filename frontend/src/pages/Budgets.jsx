@@ -142,7 +142,7 @@ export default function Budgets() {
           <p className="text-gray-400 text-sm mt-1">Set category limits to control your spending</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {budgets.map((b) => {
             const cat    = CATEGORIES[b.category];
             const pct    = Math.min(b.percentage || 0, 100);
@@ -163,7 +163,7 @@ export default function Budgets() {
                 <div className="w-full bg-gray-100 rounded-full h-3 mb-2">
                   <div className={`h-3 rounded-full transition-all duration-700 ${status.bg}`} style={{ width: `${pct}%` }} />
                 </div>
-                <div className="flex items-center justify-between text-xs text-gray-500">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500">
                   <span>{formatCurrency(b.spent || 0, currency)} spent</span>
                   <span className="font-semibold">{b.percentage || 0}%</span>
                   <span>{formatCurrency(remaining, currency)} left of {formatCurrency(b.limit, currency)}</span>
