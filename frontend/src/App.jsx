@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
+import AppUpdatePrompt from './components/AppUpdatePrompt';
 
 // Pages
 import Login from './pages/Login';
@@ -34,6 +35,7 @@ export default function App() {
             error: { style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' } }
           }}
         />
+        <AppUpdatePrompt />
         <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />

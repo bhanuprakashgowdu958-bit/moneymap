@@ -13,6 +13,13 @@
         "apple": false,
         "twitter": false
       }
+    },
+    "CapacitorUpdater": {
+      "autoUpdate": "off",
+      "statsUrl": "",
+      "appReadyTimeout": 15000,
+      "autoDeleteFailed": true,
+      "autoDeletePrevious": true
     }
   }
 }

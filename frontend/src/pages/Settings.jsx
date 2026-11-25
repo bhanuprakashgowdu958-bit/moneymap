@@ -15,6 +15,11 @@ import {
   openAppInfoSettings,
   requestNativeNotifications,
 } from '../lib/nativeBridge';
+import {
+  checkAndPrepareOtaUpdate,
+  getCurrentWebVersion,
+  triggerOtaPrompt,
+} from '../lib/otaUpdater';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -36,6 +41,7 @@ export default function Settings() {
   const [guideTab, setGuideTab] = useState('ios');
   const [showAdvancedAutomation, setShowAdvancedAutomation] = useState(false);
   const [nativeStatus, setNativeStatus] = useState(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const fileInputRef = useRef(null);
   const onAndroidApp = isNativeAndroid();
 
@@ -739,6 +745,49 @@ export default function Settings() {
       </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* App Updates (Android OTA) */}
+      {onAndroidApp && (
+        <div className="card border border-blue-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">App Updates</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Version <span className="font-mono font-semibold text-gray-700">{getCurrentWebVersion()}</span> · Updates install automatically inside MoneyMap
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={checkingUpdate}
+              onClick={async () => {
+                setCheckingUpdate(true);
+                try {
+                  const res = await checkAndPrepareOtaUpdate();
+                  if (res.status === 'ready' || res.status === 'native_required') {
+                    triggerOtaPrompt(res);
+                  } else {
+                    toast.success("You're on the latest version ✅");
+                  }
+                } catch {
+                  toast.error('Could not check for updates. Check your internet connection.');
+                } finally {
+                  setCheckingUpdate(false);
+                }
+              }}
+              className="btn-secondary text-sm flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              {checkingUpdate ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                '🔄 Check for Updates'
+              )}
+            </button>
+          </div>
         </div>
       )}
 
