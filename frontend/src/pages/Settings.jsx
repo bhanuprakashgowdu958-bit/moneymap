@@ -9,6 +9,8 @@ import {
   getNativeStatus,
   syncNativeConfig,
   setNativeAutoTrack,
+  setNativeSmsAutoTrack,
+  requestNativeSmsPermission,
   setNativeAppGuard,
   openNotificationAccessSettings,
   openUsageAccessSettings,
@@ -359,6 +361,93 @@ export default function Settings() {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Toggle 0: Direct SMS Auto-Track (Bypasses App Lock & Hidden Notifications) */}
+              <div className="p-3.5 bg-white rounded-xl border border-emerald-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900">Direct Bank SMS Auto-Track</p>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Works with App Lock
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Reads bank debit SMS directly—works even if payment apps or notifications are locked/hidden
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await requestNativeNotifications();
+                      const next = !nativeStatus?.smsAutoTrackEnabled;
+                      if (next && !nativeStatus?.hasSmsPermission) {
+                        const perm = await requestNativeSmsPermission();
+                        if (!perm?.granted) {
+                          refreshNativeStatus();
+                          toast.error('Please allow SMS permission so MoneyMap can read bank debit SMS');
+                          return;
+                        }
+                      }
+                      await setNativeSmsAutoTrack(next);
+                      await syncNativeConfig(webhookToken);
+                      refreshNativeStatus();
+                      toast.success(next ? 'Direct SMS Auto-Track enabled! 📩' : 'Direct SMS Auto-Track paused');
+                    }}
+                    className={`w-12 h-7 rounded-full transition-colors flex-shrink-0 p-0.5 ${
+                      nativeStatus?.smsAutoTrackEnabled && nativeStatus?.hasSmsPermission
+                        ? 'bg-emerald-600'
+                        : 'bg-gray-300'
+                    }`}
+                    aria-label="Toggle direct SMS auto tracking"
+                  >
+                    <span
+                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                        nativeStatus?.smsAutoTrackEnabled && nativeStatus?.hasSmsPermission ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {!nativeStatus?.hasSmsPermission ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 space-y-2">
+                    <p className="text-xs text-amber-900 font-medium">
+                      Tap <strong>Allow SMS Permission</strong> so MoneyMap can capture bank debit SMS directly.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await requestNativeNotifications();
+                          const perm = await requestNativeSmsPermission();
+                          if (perm?.granted) {
+                            await setNativeSmsAutoTrack(true);
+                            await syncNativeConfig(webhookToken);
+                            toast.success('Direct SMS Auto-Track active! 📩');
+                          } else {
+                            toast.error('SMS permission denied. If blocked, allow it in App Info → Permissions.');
+                          }
+                          refreshNativeStatus();
+                        }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                      >
+                        Allow SMS Permission →
+                      </button>
+                      {nativeStatus?.sdkInt >= 33 && (
+                        <button
+                          type="button"
+                          onClick={openAppInfoSettings}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900"
+                        >
+                          Greyed out? App Info
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-emerald-700 font-semibold">✅ Direct SMS Permission Active</p>
+                )}
+              </div>
+
               {/* Toggle 1: Notification Auto-Track */}
               <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
                 <div className="flex items-center justify-between gap-3">

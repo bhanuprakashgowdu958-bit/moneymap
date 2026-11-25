@@ -27,6 +27,10 @@ import com.getcapacitor.annotation.PermissionCallback;
         @Permission(
             alias = "notifications",
             strings = { Manifest.permission.POST_NOTIFICATIONS }
+        ),
+        @Permission(
+            alias = "sms",
+            strings = { Manifest.permission.RECEIVE_SMS }
         )
     }
 )
@@ -54,9 +58,11 @@ public class MoneyMapNativePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("isNative", true);
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(getContext()));
+        ret.put("hasSmsPermission", hasSmsPermission(getContext()));
         ret.put("hasUsageAccess", hasUsageStatsAccess(getContext()));
         ret.put("hasPostNotifications", hasPostNotificationPermission(getContext()));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(getContext()));
+        ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(getContext()));
         ret.put("appGuardEnabled", MoneyMapPrefs.isAppGuardEnabled(getContext()));
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         call.resolve(ret);
@@ -66,6 +72,13 @@ public class MoneyMapNativePlugin extends Plugin {
     public void setAutoTrackEnabled(PluginCall call) {
         boolean enabled = call.getBoolean("enabled", true);
         MoneyMapPrefs.setAutoTrackEnabled(getContext(), enabled);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setSmsAutoTrackEnabled(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", true);
+        MoneyMapPrefs.setSmsAutoTrackEnabled(getContext(), enabled);
         call.resolve();
     }
 
@@ -123,6 +136,29 @@ public class MoneyMapNativePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("granted", getPermissionState("notifications") == PermissionState.GRANTED);
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestSmsPermission(PluginCall call) {
+        if (hasSmsPermission(getContext())) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("sms", call, "smsPermCallback");
+    }
+
+    @PermissionCallback
+    private void smsPermCallback(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", getPermissionState("sms") == PermissionState.GRANTED || hasSmsPermission(getContext()));
+        call.resolve(ret);
+    }
+
+    private static boolean hasSmsPermission(Context context) {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS)
+            == PackageManager.PERMISSION_GRANTED;
     }
 
     private static boolean hasPostNotificationPermission(Context context) {

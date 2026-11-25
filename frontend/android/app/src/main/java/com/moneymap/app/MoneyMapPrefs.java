@@ -8,6 +8,7 @@ public final class MoneyMapPrefs {
     private static final String KEY_WEBHOOK_URL = "webhook_url";
     private static final String KEY_BUDGET_CHECK_BASE = "budget_check_base";
     private static final String KEY_AUTO_TRACK = "auto_track_enabled";
+    private static final String KEY_SMS_AUTO_TRACK = "sms_auto_track_enabled";
     private static final String KEY_APP_GUARD = "app_guard_enabled";
     private static final String KEY_LAST_GUARD_ALERTS = "last_guard_alerts";
 
@@ -38,6 +39,14 @@ public final class MoneyMapPrefs {
 
     public static void setAutoTrackEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_AUTO_TRACK, enabled).apply();
+    }
+
+    public static boolean isSmsAutoTrackEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SMS_AUTO_TRACK, true);
+    }
+
+    public static void setSmsAutoTrackEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_SMS_AUTO_TRACK, enabled).apply();
     }
 
     public static boolean isAppGuardEnabled(Context context) {
