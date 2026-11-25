@@ -1,7 +1,7 @@
 // Vercel Serverless Function: Real-Time Phone SMS / UPI Webhook
-// Receives bank debit SMS or UPI notification text from the MoneyMap Android app or iOS Shortcuts,
-// validates the user's personal webhook token, parses the expense, saves it to Cloud Firestore,
-// and returns a budgetAlert if that category has crossed its monthly alert threshold or limit.
+// Receives bank SMS or UPI notification text from the MoneyMap Android app or iOS Shortcuts,
+// classifies income (credits) vs expense (debits), extracts merchant/sender & category,
+// saves it to Cloud Firestore, and triggers budgetAlert for expenses when over threshold.
 
 import {
   FIREBASE_API_KEY,
@@ -35,15 +35,16 @@ const CATEGORY_KEYWORDS = {
     'croma', 'reliance digital', 'ikea', 'decathlon', 'uniqlo',
   ],
   entertainment: [
-    'bookmyshow', 'pvr', 'inox', 'cinepolis', 'movie', 'hotstar', 'disney', 'gaming', 'steam',
+    'bookmyshow', 'pvr', 'inox', 'cinepolis', 'movie', 'netflix', 'spotify', 'prime video',
+    'hotstar', 'disney', 'youtube', 'gaming', 'steam', 'playstation',
   ],
   subscriptions: [
     'netflix', 'spotify', 'prime', 'youtube premium', 'apple', 'google one', 'gym',
-    'cult.fit', 'cultfit', 'subscription', 'membership',
+    'cult.fit', 'cultfit', 'subscription', 'membership', 'cloud',
   ],
   'health-wellness': [
-    'apollo', 'pharmeasy', '1mg', 'tata 1mg', 'netmeds', 'medplus', 'pharmacy', 'chemist',
-    'hospital', 'clinic', 'doctor', 'diagnostic', 'lenskart',
+    'apollo', 'pharmeasy', '1mg', 'netmeds', 'medplus', 'pharmacy', 'chemist',
+    'hospital', 'clinic', 'doctor', 'diagnostic', 'lenskart', 'dentist',
   ],
   housing: [
     'rent', 'maintenance', 'electricity', 'bescom', 'tata power', 'adani power', 'water bill',
@@ -60,23 +61,166 @@ function capitalizeWords(str) {
     .join(' ');
 }
 
-function parseSmsExpense(rawText) {
+const NOISE_REASON_PATTERNS = [
+  { re: /\b(?:otp|one\s*time\s*password|verification\s*code|mpin|cvv)\b/i, reason: 'OTP / security message ignored' },
+  { re: /\b(?:requested\s+(?:rs|inr|₹|money)|payment\s+request|has\s+requested|collect\s+request|approve\s+to\s+pay|mandate\s+(?:created|approved)|autopay\s+(?:created|registered)|bill\s+due|minimum\s+due|pre-?approved\s+loan)\b/i, reason: 'Payment request / reminder ignored' },
+  { re: /\b(?:failed|declined|unsuccessful|could\s+not\s+be\s+processed|cancelled|canceled|reversed\s+failure)\b/i, reason: 'Failed or declined transaction ignored' },
+];
+
+const STRONG_DEBIT_RE =
+  /\b(?:debited|withdrawn|spent|deducted|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+to\s+(?!you\b|your\b)|amt\s+sent)\b/i;
+
+const STRONG_INCOME_RE =
+  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|money\s+received\b|payment\s+received\b|credited\s+(?:to\s+(?:your|a\/c|acct|x+\d+)|with|by|in|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
+
+const GENERIC_TXN_VERB_RE =
+  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|purchase|refund|cashback|salary)\b/i;
+
+function classifyTransaction(text) {
+  for (const item of NOISE_REASON_PATTERNS) {
+    if (item.re.test(text)) {
+      return { action: 'ignore', reason: item.reason };
+    }
+  }
+
+  // Standalone balance alerts without any actual debit/credit verb
+  if (
+    /\b(?:avl\.?\s*bal|available\s+balance|clear\s+bal|current\s+balance)\b/i.test(text) &&
+    !GENERIC_TXN_VERB_RE.test(text)
+  ) {
+    return { action: 'ignore', reason: 'Balance summary without transaction ignored' };
+  }
+
+  const hasIncomeSignal = STRONG_INCOME_RE.test(text);
+  const hasDebitSignal = STRONG_DEBIT_RE.test(text);
+
+  // If explicit credit signal is present without "your account debited", it's income.
+  if (hasIncomeSignal && !/\b(?:your\s+(?:a\/c|acct|account|card)\s+.*debited|debited\s+(?:from|by)\s+(?:your|a\/c|acct|[0-9,.]+))\b/i.test(text)) {
+    return { action: 'income' };
+  }
+
+  if (hasDebitSignal || /\b(?:debited|spent|paid|sent)\b/i.test(text)) {
+    return { action: 'expense' };
+  }
+
+  return { action: 'ignore', reason: 'Non-transaction message ignored' };
+}
+
+function cleanPartyCandidate(raw) {
+  if (!raw) return '';
+  return raw
+    .replace(/\b(?:via|using|through|from|to|on|at)\b.*$/i, '')
+    .replace(/^(?:mr|mrs|ms|miss|shri)\.?\s+/i, '')
+    .replace(/[^\w\s&.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isInvalidPartyName(candidate) {
+  const lower = (candidate || '').toLowerCase();
+  return (
+    !candidate ||
+    candidate.length < 2 ||
+    /^\d+$/.test(candidate) ||
+    ['a/c', 'acct', 'account', 'card', 'upi', 'your', 'you', 'my', 'the', 'bank', 'user', 'customer', 'dear', 'rs', 'inr', 'rupees'].includes(lower)
+  );
+}
+
+function extractIncomeDetails(text) {
+  const lower = text.toLowerCase();
+  let title = '';
+
+  const senderPatterns = [
+    // "Rahul Sharma paid ₹100 to you", "Rahul paid you ₹100", "Rahul sent ₹100 to you"
+    /(?:^|[:-]\s*)([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)\s+(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:to\s+you|you)\b/i,
+    // "Received ₹100 from Rahul", "transfer from RAHUL"
+    /\b(?:received(?:\s+(?:rs\.?|inr|₹)\s*[0-9,.]+)?\s+from|transfer\s+from|transferred\s+from)\s+([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\s+to\s+your|\s+into|\.|$)/i,
+    // "credited by RAHUL", "deposited by RAHUL", "from RAHUL"
+    /\b(?:credited\s+(?:by|from)|deposited\s+by|from)\s+(?!(?:rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\s+to\s+your|\s+into|\.|$)/i,
+    /\binfo:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
+    /\bvpa\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
+  ];
+
+  for (const regex of senderPatterns) {
+    const m = text.match(regex);
+    if (m && m[1]) {
+      const candidate = cleanPartyCandidate(m[1]);
+      if (!isInvalidPartyName(candidate)) {
+        title = `From ${capitalizeWords(candidate)}`;
+        break;
+      }
+    }
+  }
+
+  let category = 'upi-received';
+  if (/\b(?:salary|payroll|stipend|wages)\b/i.test(lower)) {
+    category = 'salary';
+    if (!title) title = 'Monthly Salary';
+  } else if (/\b(?:refund|cashback|reward|reversal)\b/i.test(lower)) {
+    category = 'refund-cashback';
+    if (!title) title = /\bcashback\b/i.test(lower) ? 'Cashback Received' : 'Refund Received';
+  } else if (/\b(?:interest|dividend|mutual\s*fund)\b/i.test(lower)) {
+    category = 'investment-returns';
+    if (!title) title = 'Interest / Returns';
+  } else if (!title) {
+    title = lower.includes('upi') || lower.includes('gpay') || lower.includes('phonepe') || lower.includes('paytm')
+      ? 'UPI Money Received'
+      : 'Bank Credit';
+  }
+
+  return { title, category };
+}
+
+function extractExpenseDetails(text) {
+  let title = 'Bank Debit Expense';
+  const merchantPatterns = [
+    /\bfv\.?\s*([A-Za-z0-9&.\- ]{2,30}?)(?:,|\s+bal|\s+on|$)/i,
+    /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|to|at)\s+(?!you\b|your\b)([A-Za-z0-9&.\- ]{2,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\.|$)/i,
+    /\binfo:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
+    /\b(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
+  ];
+
+  for (const regex of merchantPatterns) {
+    const m = text.match(regex);
+    if (m && m[1]) {
+      const candidate = cleanPartyCandidate(m[1]);
+      if (!isInvalidPartyName(candidate)) {
+        title = capitalizeWords(candidate);
+        break;
+      }
+    }
+  }
+
+  const lower = `${text} ${title}`.toLowerCase();
+  let category = 'other';
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some((kw) => lower.includes(kw))) {
+      if (title === 'Bank Debit Expense') {
+        const matchedKw = keywords.find((kw) => lower.includes(kw));
+        if (matchedKw) title = capitalizeWords(matchedKw);
+      }
+      category = cat;
+      break;
+    }
+  }
+
+  return { title, category };
+}
+
+export function parseTransactionSms(rawText) {
   const text = String(rawText || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
 
-  // Ignore pure credit / salary / OTP messages
-  if (/\b(?:otp|one time password|verification code)\b/i.test(text)) {
-    return { ignored: true, reason: 'OTP message ignored' };
-  }
-  if (/\b(?:credited to|has been credited|received rs|deposited)\b/i.test(text) && !/\bdebited\b/i.test(text)) {
-    return { ignored: true, reason: 'Credit message ignored' };
+  const classification = classifyTransaction(text);
+  if (classification.action === 'ignore') {
+    return { ignored: true, reason: classification.reason };
   }
 
   // Extract amount
   let amount = null;
   const amountPatterns = [
     /(?:rs\.?|inr|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-    /(?:debited(?:\s+by|\s+with)?|spent|paid|sent)\s*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+    /(?:debited(?:\s+by|\s+with)?|credited(?:\s+by|\s+with)?|received|deposited|spent|paid|sent)\s*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
     /([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:rs|rupees|inr)/i,
   ];
   for (const regex of amountPatterns) {
@@ -91,52 +235,20 @@ function parseSmsExpense(rawText) {
   }
   if (!amount) return null;
 
-  // Extract merchant
-  let title = 'Bank Debit Expense';
-  const merchantPatterns = [
-    /\bfv\.?\s*([A-Za-z0-9&.\- ]{2,30}?)(?:,|\s+bal|\s+on|$)/i,
-    /(?:transfer\s+to|transferred\s+to|paid\s+to|sent\s+to|to|at)\s+([A-Za-z0-9&.\- ]{2,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\.|$)/i,
-    /info:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-    /(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-  ];
-  for (const regex of merchantPatterns) {
-    const m = text.match(regex);
-    if (m && m[1]) {
-      const candidate = m[1].trim();
-      if (
-        !/^\d+$/.test(candidate) &&
-        !['a/c', 'account', 'card', 'upi', 'your', 'my', 'the'].includes(candidate.toLowerCase())
-      ) {
-        title = capitalizeWords(candidate);
-        break;
-      }
-    }
-  }
+  const isIncome = classification.action === 'income';
+  const details = isIncome ? extractIncomeDetails(text) : extractExpenseDetails(text);
 
-  // Category detection
-  const lower = `${text} ${title}`.toLowerCase();
-  let category = 'other';
-  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      if (title === 'Bank Debit Expense') {
-        const matchedKw = keywords.find((kw) => lower.includes(kw));
-        if (matchedKw) title = capitalizeWords(matchedKw);
-      }
-      category = cat;
-      break;
-    }
-  }
-
-  // Payment method
+  const lower = text.toLowerCase();
   let paymentMethod = 'upi';
   if (lower.includes('card') || lower.includes('pos') || lower.includes('ending')) paymentMethod = 'card';
   else if (lower.includes('neft') || lower.includes('imps') || lower.includes('rtgs')) paymentMethod = 'netbanking';
 
   return {
     ignored: false,
+    type: isIncome ? 'income' : 'expense',
     amount,
-    title,
-    category,
+    title: details.title,
+    category: details.category,
     paymentMethod,
     dateIso: new Date().toISOString(),
   };
@@ -159,7 +271,6 @@ export default async function handler(req, res) {
   }
   const uid = tokenCheck.uid;
 
-  // Extract SMS/notification text from JSON body or plain string body
   let smsText = '';
   if (typeof req.body === 'string') {
     smsText = req.body;
@@ -172,25 +283,28 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Parse the SMS/UPI text
-    const parsed = parseSmsExpense(smsText);
+    const parsed = parseTransactionSms(smsText);
     if (!parsed) {
-      return res.status(422).json({ error: 'Could not extract a valid debit amount from text.' });
+      return res.status(422).json({ error: 'Could not extract a valid transaction amount from text.' });
     }
     if (parsed.ignored) {
       return res.status(200).json({ success: true, ignored: true, reason: parsed.reason });
     }
 
-    // 2. Write expense directly into users/{uid}/expenses via Firestore REST API
     const nowIso = new Date().toISOString();
+    const noteText = parsed.type === 'income'
+      ? '💰 Auto-logged Income via Phone SMS / UPI'
+      : '📱 Auto-logged Expense via Phone SMS / UPI';
+
     const firestorePayload = {
       fields: {
+        type: { stringValue: parsed.type },
         title: { stringValue: parsed.title },
         amount: { doubleValue: Number(parsed.amount) },
         category: { stringValue: parsed.category },
         date: { timestampValue: parsed.dateIso },
         paymentMethod: { stringValue: parsed.paymentMethod },
-        note: { stringValue: '📱 Auto-logged via Phone SMS Webhook' },
+        note: { stringValue: noteText },
         isRecurring: { booleanValue: false },
         source: { stringValue: 'webhook' },
         createdAt: { timestampValue: nowIso },
@@ -209,28 +323,31 @@ export default async function handler(req, res) {
 
     if (!writeRes.ok) {
       const errBody = await writeRes.text();
-      return res.status(500).json({ error: 'Failed to save expense to Firestore.', details: errBody });
+      return res.status(500).json({ error: 'Failed to save transaction to Firestore.', details: errBody });
     }
 
-    // 3. Check monthly category budget so phone automation can alert immediately
+    // Only check category spending budgets for expenses (never for incoming credits)
     let budget = null;
-    try {
-      const now = new Date();
-      const currency = await getUserCurrency(uid);
-      budget = await evaluateCategoryBudget(
-        uid,
-        parsed.category,
-        now.getMonth() + 1,
-        now.getFullYear(),
-        currency
-      );
-    } catch {
-      budget = null;
+    if (parsed.type === 'expense') {
+      try {
+        const now = new Date();
+        const currency = await getUserCurrency(uid);
+        budget = await evaluateCategoryBudget(
+          uid,
+          parsed.category,
+          now.getMonth() + 1,
+          now.getFullYear(),
+          currency
+        );
+      } catch {
+        budget = null;
+      }
     }
 
     return res.status(200).json({
       success: true,
       expense: {
+        type: parsed.type,
         title: parsed.title,
         amount: parsed.amount,
         category: parsed.category,

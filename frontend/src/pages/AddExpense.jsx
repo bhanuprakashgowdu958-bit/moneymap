@@ -6,7 +6,7 @@ import { buildBudgetAlert } from '../lib/budgetAlerts';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { parseExpenseText } from '../lib/smsParser';
 import { scanReceiptImage } from '../lib/ocrScanner';
-import { CATEGORIES, PAYMENT_METHODS } from '../lib/constants';
+import { CATEGORIES, INCOME_CATEGORIES, PAYMENT_METHODS, getCategoryMeta } from '../lib/constants';
 import toast from 'react-hot-toast';
 
 /**
@@ -53,6 +53,7 @@ export default function AddExpense() {
   );
 
   const [form, setForm] = useState({
+    type:          'expense',
     title:         '',
     amount:        '',
     category:      'food-delivery',
@@ -92,13 +93,16 @@ export default function AddExpense() {
     }
 
     const parsed = parseExpenseText(text);
-    if (parsed && (parsed.amount || parsed.title !== 'Expense')) {
+    if (parsed && (parsed.amount || !['Expense', 'Income', 'Bank Debit Expense'].includes(parsed.title))) {
       setParsedInfo(parsed);
+      const nextType = parsed.type === 'income' ? 'income' : 'expense';
+      const activeCats = nextType === 'income' ? INCOME_CATEGORIES : CATEGORIES;
       setForm((prev) => ({
         ...prev,
+        type:          nextType,
         amount:        parsed.amount || prev.amount,
         title:         parsed.title !== 'Bank Debit Expense' && parsed.title !== 'Expense' ? parsed.title : prev.title,
-        category:      parsed.category !== 'other' ? parsed.category : prev.category,
+        category:      activeCats[parsed.category] ? parsed.category : (nextType === 'income' ? 'upi-received' : prev.category),
         paymentMethod: parsed.paymentMethod || prev.paymentMethod,
         date:          parsed.date || prev.date,
       }));
@@ -198,9 +202,14 @@ export default function AddExpense() {
     const cleanAmt = sanitizeAmount(form.amount);
     const numAmount = Number(cleanAmt);
     if (!cleanAmt || isNaN(numAmount) || numAmount <= 0) {
-      return toast.error('Please enter the amount spent', { icon: '⚠️' });
+      return toast.error(
+        form.type === 'income' ? 'Please enter the amount received' : 'Please enter the amount spent',
+        { icon: '⚠️' }
+      );
     }
-    const finalTitle = form.title.trim() || CATEGORIES[form.category]?.label || 'Expense';
+    const isIncome = form.type === 'income';
+    const catMeta = getCategoryMeta(form.category, form.type);
+    const finalTitle = form.title.trim() || catMeta?.label || (isIncome ? 'Income' : 'Expense');
     setLoading(true);
     try {
       let receiptUrl = '';
@@ -222,18 +231,22 @@ export default function AddExpense() {
         receiptPublicId,
       });
 
-      const postAlert = buildBudgetAlert(
-        budgetMap[form.category],
-        (spentMap[form.category] || 0) + numAmount,
-        currency
-      );
-      if (postAlert) {
-        toast(postAlert.message, {
-          icon: postAlert.level === 'over' ? '🚨' : '⚠️',
-          duration: 6000,
-        });
+      if (isIncome) {
+        toast.success('Income added! 💰');
       } else {
-        toast.success('Expense added! 💸');
+        const postAlert = buildBudgetAlert(
+          budgetMap[form.category],
+          (spentMap[form.category] || 0) + numAmount,
+          currency
+        );
+        if (postAlert) {
+          toast(postAlert.message, {
+            icon: postAlert.level === 'over' ? '🚨' : '⚠️',
+            duration: 6000,
+          });
+        } else {
+          toast.success('Expense added! 💸');
+        }
       }
       navigate('/expenses');
     } catch (err) {
@@ -244,19 +257,58 @@ export default function AddExpense() {
     }
   };
 
-  const selectedCat = CATEGORIES[form.category];
+  const isIncome = form.type === 'income';
+  const activeCategories = isIncome ? INCOME_CATEGORIES : CATEGORIES;
+  const selectedCat = getCategoryMeta(form.category, form.type);
   const pendingAmount = Number(sanitizeAmount(form.amount)) || 0;
-  const projectedAlert = buildBudgetAlert(
-    budgetMap[form.category],
-    (spentMap[form.category] || 0) + pendingAmount,
-    currency
-  );
+  const projectedAlert = !isIncome
+    ? buildBudgetAlert(
+        budgetMap[form.category],
+        (spentMap[form.category] || 0) + pendingAmount,
+        currency
+      )
+    : null;
+
+  const handleTypeSwitch = (nextType) => {
+    if (nextType === form.type) return;
+    setForm((prev) => ({
+      ...prev,
+      type: nextType,
+      category: nextType === 'income' ? 'upi-received' : 'food-delivery',
+    }));
+  };
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 sm:space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Add Expense</h1>
-        <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Track every rupee automatically or manually</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
+            {isIncome ? 'Add Income' : 'Add Expense'}
+          </h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Track money received and money spent accurately</p>
+        </div>
+
+        {/* Expense / Income Segmented Switch */}
+        <div className="grid grid-cols-2 gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-sm w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => handleTypeSwitch('expense')}
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+              !isIncome ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            💸 Expense
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTypeSwitch('income')}
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+              isIncome ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            💰 Income
+          </button>
+        </div>
       </div>
 
       {/* ⚡ MAGIC SMS / BANK ALERT PARSER CARD */}
@@ -311,8 +363,11 @@ export default function AddExpense() {
                 {parsedInfo.title}
               </span>
             )}
+            <span className="bg-white/20 px-2 py-0.5 rounded-md font-semibold text-white">
+              {parsedInfo.type === 'income' ? '💰 Income' : '💸 Expense'}
+            </span>
             <span className="bg-white/20 px-2 py-0.5 rounded-md text-blue-100">
-              {CATEGORIES[parsedInfo.category]?.icon} {CATEGORIES[parsedInfo.category]?.label}
+              {getCategoryMeta(parsedInfo.category, parsedInfo.type)?.icon} {getCategoryMeta(parsedInfo.category, parsedInfo.type)?.label}
             </span>
             <span className="bg-white/20 px-2 py-0.5 rounded-md uppercase tracking-wider text-[10px]">
               {parsedInfo.paymentMethod}
@@ -339,7 +394,9 @@ export default function AddExpense() {
             </div>
           ) : null}
 
-          <p className="text-sm text-gray-500 mb-2 font-medium mt-1">Amount Spent</p>
+          <p className="text-sm text-gray-500 mb-2 font-medium mt-1">
+            {isIncome ? 'Amount Received' : 'Amount Spent'}
+          </p>
           <div className="flex items-center justify-center gap-1.5">
             <span className="text-2xl sm:text-3xl font-bold text-gray-400">{currency}</span>
             <input
@@ -391,11 +448,11 @@ export default function AddExpense() {
 
         {/* Title */}
         <div>
-          <label className="label">What did you spend on?</label>
+          <label className="label">{isIncome ? 'Where did you receive it from?' : 'What did you spend on?'}</label>
           <input
             type="text"
             className="input-field"
-            placeholder="e.g. Zomato dinner, Uber ride, Blinkit..."
+            placeholder={isIncome ? 'e.g. From Rahul, Monthly Salary, Amazon Refund...' : 'e.g. Zomato dinner, Uber ride, Blinkit...'}
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
@@ -405,13 +462,13 @@ export default function AddExpense() {
         <div>
           <label className="label">Category</label>
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-            {Object.entries(CATEGORIES).map(([key, cat]) => (
+            {Object.entries(activeCategories).map(([key, cat]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() =>
                   setForm((prev) => {
-                    const prevCatLabel = CATEGORIES[prev.category]?.label;
+                    const prevCatLabel = activeCategories[prev.category]?.label;
                     const shouldAutoFill = !prev.title.trim() || prev.title === prevCatLabel;
                     return {
                       ...prev,
@@ -422,7 +479,9 @@ export default function AddExpense() {
                 }
                 className={`flex flex-col items-center justify-center gap-1 p-2.5 sm:p-3 min-h-[72px] rounded-xl border-2 transition-all text-[11px] sm:text-xs font-medium active:scale-95 ${
                   form.category === key
-                    ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm scale-[1.02]'
+                    ? isIncome
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm scale-[1.02]'
+                      : 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm scale-[1.02]'
                     : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-gray-200 hover:bg-white'
                 }`}
               >
@@ -627,14 +686,14 @@ export default function AddExpense() {
           <button
             type="submit"
             disabled={loading || isScanningOcr}
-            className="btn-primary flex-1 flex items-center justify-center gap-2"
+            className={`${isIncome ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-5 min-h-[44px] rounded-xl transition-all duration-200 shadow-sm hover:shadow-md active:scale-95' : 'btn-primary'} flex-1 flex items-center justify-center gap-2`}
           >
             {loading ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Saving...</>
             ) : isScanningOcr ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Scanning Receipt...</>
             ) : (
-              `Save Expense ${selectedCat?.icon || '💸'}`
+              `${isIncome ? 'Save Income' : 'Save Expense'} ${selectedCat?.icon || '💸'}`
             )}
           </button>
         </div>

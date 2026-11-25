@@ -7,9 +7,10 @@ import toast from 'react-hot-toast';
 
 export default function Insights() {
   const { user, currency, monthlyIncome } = useAuth();
-  const [stats,    setStats]    = useState([]);
-  const [total,    setTotal]    = useState(0);
-  const [loading,  setLoading]  = useState(true);
+  const [stats,       setStats]       = useState([]);
+  const [total,       setTotal]       = useState(0);
+  const [incomeTotal, setIncomeTotal] = useState(0);
+  const [loading,     setLoading]     = useState(true);
   const [month,    setMonth]    = useState(new Date().getMonth() + 1);
   const [year]                  = useState(new Date().getFullYear());
   const [lastMonth, setLastMonth] = useState(0);
@@ -26,6 +27,7 @@ export default function Insights() {
       .then(([cur, prev]) => {
         setStats(cur.stats);
         setTotal(cur.total);
+        setIncomeTotal(cur.incomeTotal || 0);
         setLastMonth(prev.total);
       })
       .catch(() => toast.error('Failed to load insights'))
@@ -72,7 +74,7 @@ export default function Insights() {
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Total Spent</p><p className="text-lg sm:text-xl font-bold text-gray-900 tabular-nums truncate">{formatCurrency(total, currency)}</p></div>
-            <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Categories</p><p className="text-lg sm:text-xl font-bold text-gray-900 tabular-nums">{stats.length}</p></div>
+            <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Income Received</p><p className="text-lg sm:text-xl font-bold text-emerald-600 tabular-nums truncate">+{formatCurrency(incomeTotal, currency)}</p></div>
             <div className="card p-3.5 sm:p-5 text-center min-w-0">
               <p className="text-xs text-gray-500 mb-1">Top Category</p>
               <p className="text-xl">{CATEGORIES[topCategory?._id]?.icon}</p>

@@ -1,7 +1,7 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { isNativeAndroid, LIVE_API_ORIGIN } from './nativeBridge';
 
-export const NATIVE_APP_SCHEMA = 4;
+export const NATIVE_APP_SCHEMA = 5;
 export const OTA_READY_EVENT = 'moneymap:ota-ready';
 
 export function getCurrentWebVersion() {

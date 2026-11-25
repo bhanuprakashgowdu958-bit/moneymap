@@ -14,7 +14,7 @@ import {
   subMonths,
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus } from 'lucide-react';
-import { CATEGORIES, formatCurrency } from '../lib/constants';
+import { formatCurrency, getCategoryMeta } from '../lib/constants';
 
 function toDayKey(dateInput) {
   const d = new Date(dateInput);
@@ -32,13 +32,18 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => new Date());
 
-  // Group expenses by local YYYY-MM-DD key
+  // Group transactions by local YYYY-MM-DD key (heatmap tracks spending only)
   const { byDay, monthTotal, monthMaxDay, noSpendDays } = useMemo(() => {
     const map = {};
     expenses.forEach((exp) => {
       const key = toDayKey(exp.date);
-      if (!map[key]) map[key] = { total: 0, items: [] };
-      map[key].total += Number(exp.amount) || 0;
+      if (!map[key]) map[key] = { total: 0, incomeTotal: 0, items: [] };
+      const amt = Number(exp.amount) || 0;
+      if (exp.type === 'income') {
+        map[key].incomeTotal += amt;
+      } else {
+        map[key].total += amt;
+      }
       map[key].items.push(exp);
     });
 
@@ -263,7 +268,8 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
           <div className="flex-1 py-2.5 space-y-2 max-h-[210px] overflow-y-auto">
             {selectedData.items.length > 0 ? (
               selectedData.items.map((e) => {
-                const cat = CATEGORIES[e.category] || CATEGORIES.other;
+                const isIncome = e.type === 'income';
+                const cat = getCategoryMeta(e.category, e.type);
                 return (
                   <div
                     key={e.id}
@@ -281,8 +287,8 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
                         {cat.label} · {e.paymentMethod?.toUpperCase() || 'UPI'}
                       </p>
                     </div>
-                    <span className="text-sm font-bold text-gray-900 flex-shrink-0">
-                      {formatCurrency(e.amount, currency)}
+                    <span className={`text-sm font-bold flex-shrink-0 tabular-nums ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      {isIncome ? '+' : ''}{formatCurrency(e.amount, currency)}
                     </span>
                   </div>
                 );

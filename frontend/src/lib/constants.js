@@ -106,6 +106,64 @@ export const CATEGORIES = {
   }
 };
 
+export const INCOME_CATEGORIES = {
+  'upi-received': {
+    label: 'UPI Received',
+    icon: '📲',
+    color: '#0284c7',
+    bgColor: '#e0f2fe',
+    textColor: '#0369a1',
+    description: 'GPay, PhonePe, Paytm transfers received'
+  },
+  'salary': {
+    label: 'Salary',
+    icon: '💼',
+    color: '#059669',
+    bgColor: '#ecfdf5',
+    textColor: '#047857',
+    description: 'Monthly salary & payroll'
+  },
+  'freelance-business': {
+    label: 'Freelance / Business',
+    icon: '💻',
+    color: '#7c3aed',
+    bgColor: '#f5f3ff',
+    textColor: '#6d28d9',
+    description: 'Client payments, side income'
+  },
+  'refund-cashback': {
+    label: 'Refund / Cashback',
+    icon: '🎁',
+    color: '#16a34a',
+    bgColor: '#f0fdf4',
+    textColor: '#15803d',
+    description: 'Order refunds, rewards & cashback'
+  },
+  'investment-returns': {
+    label: 'Returns / Interest',
+    icon: '📈',
+    color: '#0d9488',
+    bgColor: '#f0fdfa',
+    textColor: '#0f766e',
+    description: 'Bank interest, dividends, mutual funds'
+  },
+  'other-income': {
+    label: 'Other Income',
+    icon: '💰',
+    color: '#10b981',
+    bgColor: '#ecfdf5',
+    textColor: '#047857',
+    description: 'Gifts, reimbursements & other credits'
+  }
+};
+
+export function getCategoryMeta(category, type = 'expense') {
+  if (type === 'income') {
+    return INCOME_CATEGORIES[category] || CATEGORIES[category] || INCOME_CATEGORIES['other-income'];
+  }
+  return CATEGORIES[category] || INCOME_CATEGORIES[category] || CATEGORIES.other;
+}
+
 export const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI', icon: '📲' },
   { value: 'card', label: 'Card', icon: '💳' },

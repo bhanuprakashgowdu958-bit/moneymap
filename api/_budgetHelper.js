@@ -161,6 +161,7 @@ export async function evaluateCategoryBudget(uid, category, month, year, currenc
 
     for (const d of docs) {
       const f = d.fields || {};
+      if (readFirestoreValue(f.type) === 'income') continue;
       const expCat = readFirestoreValue(f.category);
       if (expCat !== category) continue;
 

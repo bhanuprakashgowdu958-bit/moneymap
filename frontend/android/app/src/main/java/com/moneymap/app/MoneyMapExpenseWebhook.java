@@ -21,7 +21,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Shared debit-detection, cross-source deduplication, and webhook uploader
+ * Shared debit/credit detection, cross-source deduplication, and webhook uploader
  * used by both MoneyMapSmsReceiver (RECEIVE_SMS) and MoneyMapNotificationListener.
  */
 public final class MoneyMapExpenseWebhook {
@@ -29,12 +29,22 @@ public final class MoneyMapExpenseWebhook {
     private static final long DEDUPE_WINDOW_MS = 30_000L;
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|paid\\s+to|sent\\s+(?:rs|inr|₹)|spent|purchase|upi|a/c|acct)",
+        "(?:debited|paid\\s+to|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|purchase|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern CREDIT_SIGNAL = Pattern.compile(
+        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|cr\\.?\\s+(?:to|by))",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern GENERIC_BANK_SIGNAL = Pattern.compile(
+        "(?:upi|a/c|acct)",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern IGNORE_SIGNAL = Pattern.compile(
-        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code)\\b",
+        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|requested\\s+(?:rs|inr|₹|money)|transaction\\s+failed|payment\\s+failed|declined)\\b",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -51,11 +61,14 @@ public final class MoneyMapExpenseWebhook {
     public static boolean looksLikeDebitExpense(String text) {
         if (text == null || text.trim().length() < 8) return false;
         if (IGNORE_SIGNAL.matcher(text).find()) return false;
-        return DEBIT_SIGNAL.matcher(text).find() && AMOUNT_SIGNAL.matcher(text).find();
+        boolean hasSignal = DEBIT_SIGNAL.matcher(text).find()
+            || CREDIT_SIGNAL.matcher(text).find()
+            || GENERIC_BANK_SIGNAL.matcher(text).find();
+        return hasSignal && AMOUNT_SIGNAL.matcher(text).find();
     }
 
     /**
-     * Enqueues a debit text upload if the same amount/message has not already been
+     * Enqueues a transaction upload if the same direction + amount has not already been
      * processed within DEDUPE_WINDOW_MS (prevents double-logging when both SMS and
      * notification listeners fire for the same transaction).
      */
@@ -95,12 +108,13 @@ public final class MoneyMapExpenseWebhook {
     }
 
     private static String buildDedupeKey(String text) {
+        String dir = CREDIT_SIGNAL.matcher(text).find() ? "cr:" : "dr:";
         Matcher m = AMOUNT_SIGNAL.matcher(text);
         if (m.find() && m.group(1) != null) {
             String normalizedAmt = m.group(1).replace(",", "").replaceAll("\\.00$", "");
-            return "amt:" + normalizedAmt;
+            return dir + "amt:" + normalizedAmt;
         }
-        return "txt:" + text.trim().toLowerCase(Locale.ROOT);
+        return dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
     }
 
     private static void pruneExpired(long now) {

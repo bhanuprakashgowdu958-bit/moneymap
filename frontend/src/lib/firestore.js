@@ -276,9 +276,11 @@ export async function hasAnyUserActivity(uid) {
 
 export async function addExpense(uid, data) {
   const localId = `exp-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  const txType = data.type === 'income' ? 'income' : 'expense';
   const newExpense = {
     id: localId,
     ...data,
+    type: txType,
     amount: Number(data.amount),
     date: new Date(data.date).toISOString(),
     createdAt: new Date().toISOString(),
@@ -296,6 +298,7 @@ export async function addExpense(uid, data) {
       await withTimeout(
         addDoc(ref, {
           ...data,
+          type: txType,
           amount: Number(data.amount),
           date: Timestamp.fromDate(new Date(data.date)),
           createdAt: serverTimestamp(),
@@ -353,7 +356,7 @@ export async function deleteExpense(uid, expenseId) {
   }
 }
 
-export async function getExpenses(uid, { month, year, category } = {}) {
+export async function getExpenses(uid, { month, year, category, type } = {}) {
   let expenses = [];
   let fetchedFromFirestore = false;
 
@@ -367,6 +370,7 @@ export async function getExpenses(uid, { month, year, category } = {}) {
         expenses = snap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
+          type: d.data().type === 'income' ? 'income' : 'expense',
           date: d.data().date?.toDate?.() ?? new Date(d.data().date),
         }));
         fetchedFromFirestore = true;
@@ -384,6 +388,7 @@ export async function getExpenses(uid, { month, year, category } = {}) {
     const defaultData = isDemoUser(uid) ? getInitialDemoExpenses() : [];
     expenses = loadLocal(getExpenseStorageKey(uid), defaultData).map((e) => ({
       ...e,
+      type: e.type === 'income' ? 'income' : 'expense',
       date: new Date(e.date),
     }));
   }
@@ -393,6 +398,10 @@ export async function getExpenses(uid, { month, year, category } = {}) {
       const d = new Date(e.date);
       return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
     });
+  }
+
+  if (type && type !== 'all') {
+    expenses = expenses.filter((e) => e.type === type);
   }
 
   if (category && category !== 'all') {
@@ -409,11 +418,16 @@ export async function getRecentExpenses(uid, count = 5, preloadedExpenses = null
 
 export async function getMonthlyStats(uid, month, year, preloadedExpenses = null) {
   const all = preloadedExpenses || await getExpenses(uid);
-  const curExpenses = all.filter((e) => {
+  const curTransactions = all.filter((e) => {
     const d = new Date(e.date);
     return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
   });
+
+  const curExpenses = curTransactions.filter((e) => e.type !== 'income');
+  const curIncomes = curTransactions.filter((e) => e.type === 'income');
+
   const total = curExpenses.reduce((s, e) => s + e.amount, 0);
+  const incomeTotal = curIncomes.reduce((s, e) => s + e.amount, 0);
 
   const byCategory = {};
   curExpenses.forEach((e) => {
@@ -426,7 +440,15 @@ export async function getMonthlyStats(uid, month, year, preloadedExpenses = null
     .map(([category, v]) => ({ _id: category, ...v }))
     .sort((a, b) => b.total - a.total);
 
-  return { total, stats, expenses: curExpenses, allExpenses: all };
+  return {
+    total,
+    incomeTotal,
+    netBalance: incomeTotal - total,
+    stats,
+    expenses: curExpenses,
+    incomes: curIncomes,
+    allExpenses: all,
+  };
 }
 
 export async function getWeeklyData(uid, preloadedExpenses = null) {
@@ -436,6 +458,7 @@ export async function getWeeklyData(uid, preloadedExpenses = null) {
 
   const dayMap = {};
   all.forEach((e) => {
+    if (e.type === 'income') return;
     const d = new Date(e.date);
     if (d >= sevenDaysAgo) {
       const key = d.toISOString().split('T')[0];

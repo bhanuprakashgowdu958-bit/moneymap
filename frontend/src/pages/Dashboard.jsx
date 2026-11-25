@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { getExpenses, getBudgets } from '../lib/firestore';
-import { CATEGORIES, formatCurrency } from '../lib/constants';
+import { CATEGORIES, formatCurrency, getCategoryMeta } from '../lib/constants';
 import { buildBudgetAlert } from '../lib/budgetAlerts';
 import SpendingCalendar from '../components/SpendingCalendar';
 
@@ -34,7 +34,7 @@ function StatCard({ icon, label, value, sub, subColor = 'text-gray-500', bgColor
 export default function Dashboard() {
   const { user, displayName, monthlyIncome, currency } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats]     = useState({ total: 0, stats: [] });
+  const [stats, setStats]     = useState({ total: 0, incomeTotal: 0, stats: [] });
   const [lastMonth, setLastMonth] = useState(0);
   const [todayTotal, setTodayTotal] = useState(0);
   const [weekly, setWeekly]   = useState([]);
@@ -56,12 +56,15 @@ export default function Dashboard() {
     ])
       .then(([allExp, bud]) => {
         setAllExpenses(allExp);
-        // Current month calculations
-        const curExpenses = allExp.filter((e) => {
+        // Current month calculations (expenses vs income separated accurately)
+        const curTransactions = allExp.filter((e) => {
           const d = new Date(e.date);
           return d.getMonth() + 1 === month && d.getFullYear() === year;
         });
+        const curExpenses = curTransactions.filter((e) => e.type !== 'income');
+        const curIncomes = curTransactions.filter((e) => e.type === 'income');
         const curTotal = curExpenses.reduce((s, e) => s + e.amount, 0);
+        const curIncomeTotal = curIncomes.reduce((s, e) => s + e.amount, 0);
 
         const byCategory = {};
         curExpenses.forEach((e) => {
@@ -73,29 +76,31 @@ export default function Dashboard() {
           .map(([cat, v]) => ({ _id: cat, ...v }))
           .sort((a, b) => b.total - a.total);
 
-        setStats({ total: curTotal, stats: statsArr, expenses: curExpenses });
+        setStats({ total: curTotal, incomeTotal: curIncomeTotal, stats: statsArr, expenses: curExpenses });
 
-        // Previous month calculation
+        // Previous month calculation (expenses only)
         const prevTotal = allExp
           .filter((e) => {
+            if (e.type === 'income') return false;
             const d = new Date(e.date);
             return d.getMonth() + 1 === prevMonth && d.getFullYear() === prevYear;
           })
           .reduce((s, e) => s + e.amount, 0);
         setLastMonth(prevTotal);
 
-        // Today's total
+        // Today's total (expenses only)
         const todayStr = now.toDateString();
         const todaySum = curExpenses
           .filter((e) => new Date(e.date).toDateString() === todayStr)
           .reduce((s, e) => s + e.amount, 0);
         setTodayTotal(todaySum);
 
-        // Weekly chart data (last 7 days)
+        // Weekly chart data (last 7 days, expenses only)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const dayMap = {};
         allExp.forEach((e) => {
+          if (e.type === 'income') return;
           const d = new Date(e.date);
           if (d >= sevenDaysAgo) {
             const key = d.toISOString().split('T')[0];
@@ -137,8 +142,9 @@ export default function Dashboard() {
 
   const changeAbs = lastMonth > 0 ? Math.abs(Math.round(((stats.total - lastMonth) / lastMonth) * 100)) : 0;
   const changeIsUp = stats.total > lastMonth;
-  const safeToSpend = Math.max(0, monthlyIncome - stats.total);
-  const safePercent = monthlyIncome > 0 ? Math.round((safeToSpend / monthlyIncome) * 100) : null;
+  const effectiveIncome = monthlyIncome > 0 ? monthlyIncome : stats.incomeTotal;
+  const safeToSpend = Math.max(0, effectiveIncome - stats.total);
+  const safePercent = effectiveIncome > 0 ? Math.round((safeToSpend / effectiveIncome) * 100) : null;
 
   const pieData = stats.stats.slice(0, 6).map((c) => ({
     name:  CATEGORIES[c._id]?.label || c._id,
@@ -229,9 +235,10 @@ export default function Dashboard() {
           subColor={changeIsUp ? 'text-red-500' : 'text-emerald-500'} bgColor="bg-red-50" />
         <StatCard icon="💰" label="Today's Spending" value={formatCurrency(todayTotal, currency)} sub="All categories" bgColor="bg-amber-50" />
         <StatCard icon="✅" label="Safe to Spend" value={formatCurrency(safeToSpend, currency)}
-          sub={safePercent !== null ? `${safePercent}% of income left` : 'Set income in settings'}
+          sub={safePercent !== null ? `${safePercent}% of ${monthlyIncome > 0 ? 'budgeted ' : 'received '}income left` : 'Set income or log receipts'}
           subColor={safePercent !== null && safePercent < 20 ? 'text-red-500' : 'text-emerald-500'} bgColor="bg-emerald-50" />
-        <StatCard icon="📅" label="Last Month" value={formatCurrency(lastMonth, currency)} sub="Previous period" bgColor="bg-purple-50" />
+        <StatCard icon="📥" label="Received (Income)" value={`+${formatCurrency(stats.incomeTotal, currency)}`}
+          sub="Money credited this month" subColor="text-emerald-600" bgColor="bg-emerald-50" />
       </div>
 
       {/* Interactive Spending Calendar */}
@@ -326,13 +333,14 @@ export default function Dashboard() {
 
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900">Recent Expenses</h2>
+            <h2 className="text-base font-semibold text-gray-900">Recent Activity</h2>
             <Link to="/expenses" className="text-sm text-blue-600 font-semibold hover:underline">View all →</Link>
           </div>
           {recent.length > 0 ? (
             <div className="space-y-3">
               {recent.map((e) => {
-                const cat = CATEGORIES[e.category];
+                const isIncome = e.type === 'income';
+                const cat = getCategoryMeta(e.category, e.type);
                 return (
                   <div key={e.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ backgroundColor: cat?.bgColor }}>{cat?.icon}</div>
@@ -340,7 +348,9 @@ export default function Dashboard() {
                       <p className="text-sm font-semibold text-gray-800 truncate">{e.title}</p>
                       <p className="text-xs text-gray-400">{cat?.label} · {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
                     </div>
-                    <span className="text-sm font-bold text-gray-900 flex-shrink-0">{formatCurrency(e.amount, currency)}</span>
+                    <span className={`text-sm font-bold flex-shrink-0 tabular-nums ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      {isIncome ? '+' : ''}{formatCurrency(e.amount, currency)}
+                    </span>
                   </div>
                 );
               })}

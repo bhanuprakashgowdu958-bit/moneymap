@@ -7,7 +7,7 @@ import { isNativeAndroid, syncNativeConfig } from '../lib/nativeBridge';
 
 const navItems = [
   { to: '/dashboard', icon: '📊', label: 'Home' },
-  { to: '/expenses', icon: '📋', label: 'Expenses' },
+  { to: '/expenses', icon: '📋', label: 'Activity' },
   { to: '/add-expense', icon: '➕', label: 'Add', highlight: true },
   { to: '/budgets', icon: '🎯', label: 'Budgets' },
   { to: '/insights', icon: '💡', label: 'Insights' },
