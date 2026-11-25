@@ -21,7 +21,7 @@ export default function App() {
       <BrowserRouter>
         <Toaster
           position="top-center"
-          containerStyle={{ top: 14 }}
+          containerStyle={{ top: 'max(14px, env(safe-area-inset-top))' }}
           toastOptions={{
             style: {
               borderRadius: '14px',

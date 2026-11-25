@@ -113,8 +113,8 @@ export default function Budgets() {
             <div>
               <label className="label">Monthly Limit ({currency})</label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">{currency}</span>
-                <input type="number" className="input-field pl-8" placeholder="5000"
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 font-medium">{currency}</span>
+                <input type="number" className={`input-field ${currency.length > 1 ? 'pl-14' : 'pl-8'}`} placeholder="5000"
                   value={form.limit} onChange={(e) => setForm({ ...form, limit: e.target.value })} required min="1" />
               </div>
             </div>

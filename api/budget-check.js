@@ -1,5 +1,5 @@
 // Vercel Serverless Function: App-Open Pre-Order Budget Guard
-// Called by Apple Shortcuts ("When App Opens") or Android MacroDroid ("Application Launched")
+// Called by the MoneyMap Android App Guard service or Apple Shortcuts ("When App Opens")
 // before the user places an order on food delivery / shopping apps.
 
 import {

@@ -60,8 +60,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4 py-8">
-      <div className="w-full max-w-md">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex flex-col px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] overflow-y-auto">
+      <div className="w-full max-w-md m-auto">
         {/* Logo */}
         <div className="text-center mb-5 sm:mb-8">
           <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-lg">
@@ -76,12 +76,12 @@ export default function Login() {
 
           {/* Mandatory Mobile Number + Google Sign In */}
           <div className="bg-gradient-to-br from-blue-50/60 to-indigo-50/40 border border-blue-100 rounded-2xl p-4 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <label className="text-xs font-semibold text-gray-800 flex items-center gap-1 whitespace-nowrap">
                 <span>📱 Mobile Number</span>
                 <span className="text-red-500 font-bold">*Mandatory</span>
               </label>
-              <span className="text-[11px] text-blue-600 font-medium">Required for Google Login</span>
+              <span className="text-[11px] text-blue-600 font-medium whitespace-nowrap">Required for Google Login</span>
             </div>
 
             <div className="relative mb-2">
@@ -93,12 +93,13 @@ export default function Login() {
                 inputMode="numeric"
                 autoComplete="tel-national"
                 ref={phoneInputRef}
-                className={`input-field pl-16 text-sm bg-white ${
+                className={`input-field pl-16 bg-white ${
                   phoneError ? 'border-red-500 ring-2 ring-red-100 bg-red-50/30' : ''
                 }`}
                 placeholder="98765 43210"
                 maxLength={10}
                 value={googlePhone}
+                onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 280)}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '').slice(0, 10);
                   setGooglePhone(val);

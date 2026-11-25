@@ -6,6 +6,10 @@
     "androidScheme": "https"
   },
   "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "LIGHT"
+    },
     "SocialLogin": {
       "providers": {
         "google": true,

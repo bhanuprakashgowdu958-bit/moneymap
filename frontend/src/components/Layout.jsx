@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,48 @@ const navItems = [
 export default function Layout({ children }) {
   const { user, displayName, photoURL, isFirebaseConfigured, logout } = useAuth();
   const navigate = useNavigate();
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const maxHeightRef = useRef(typeof window !== 'undefined' ? window.innerHeight : 0);
+  const lastWidthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 0);
+
+  useEffect(() => {
+    const updateKeyboardState = () => {
+      if (window.innerWidth >= 1024) {
+        setKeyboardOpen(false);
+        return;
+      }
+      if (Math.abs(window.innerWidth - lastWidthRef.current) > 40) {
+        lastWidthRef.current = window.innerWidth;
+        maxHeightRef.current = window.innerHeight;
+      } else if (window.innerHeight > maxHeightRef.current) {
+        maxHeightRef.current = window.innerHeight;
+      }
+      const heightDrop = maxHeightRef.current - window.innerHeight;
+      setKeyboardOpen(heightDrop > 140);
+    };
+
+    window.addEventListener('resize', updateKeyboardState);
+    window.visualViewport?.addEventListener('resize', updateKeyboardState);
+    return () => {
+      window.removeEventListener('resize', updateKeyboardState);
+      window.visualViewport?.removeEventListener('resize', updateKeyboardState);
+    };
+  }, []);
+
+  const handleFocusIn = (e) => {
+    const el = e.target;
+    if (!el || window.innerWidth >= 1024) return;
+    const tag = el.tagName;
+    const inputType = (el.type || '').toLowerCase();
+    const opensKeyboard =
+      tag === 'TEXTAREA' ||
+      (tag === 'INPUT' && !['checkbox', 'radio', 'range', 'file', 'button', 'submit'].includes(inputType));
+    if (!opensKeyboard) return;
+
+    setTimeout(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 280);
+  };
 
   useEffect(() => {
     if (isNativeAndroid() && user?.uid && !isDemoUser(user.uid)) {
@@ -158,16 +200,20 @@ export default function Layout({ children }) {
         </header>
 
         {/* Page content */}
-        <div className="flex-1 overflow-y-auto px-3.5 py-4 sm:p-6 lg:p-8 pb-28 lg:pb-8 page-enter max-w-7xl mx-auto w-full">
+        <div
+          onFocusCapture={handleFocusIn}
+          className={`flex-1 overflow-y-auto px-3.5 py-4 sm:p-6 lg:p-8 ${keyboardOpen ? 'pb-6' : 'pb-28'} lg:pb-8 page-enter max-w-7xl mx-auto w-full`}
+        >
           {children}
         </div>
       </main>
 
-      {/* Bottom nav - Mobile */}
-      <nav
-        aria-label="Primary mobile navigation"
-        className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-gray-200/80 px-1.5 pt-1.5 pb-safe z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]"
-      >
+      {/* Bottom nav - Mobile (hidden while virtual keyboard is open so form inputs stay unobstructed) */}
+      {!keyboardOpen && (
+        <nav
+          aria-label="Primary mobile navigation"
+          className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-gray-200/80 px-1.5 pt-1.5 pb-safe z-30 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]"
+        >
         <div className="grid grid-cols-5 items-end max-w-md mx-auto">
           {navItems.map((item) => (
             <NavLink
@@ -206,6 +252,7 @@ export default function Layout({ children }) {
           ))}
         </div>
       </nav>
+      )}
     </div>
   );
 }

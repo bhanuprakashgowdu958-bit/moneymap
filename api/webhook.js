@@ -1,5 +1,5 @@
 // Vercel Serverless Function: Real-Time Phone SMS / UPI Webhook
-// Receives bank debit SMS or UPI notification text from iOS Shortcuts / Android MacroDroid,
+// Receives bank debit SMS or UPI notification text from the MoneyMap Android app or iOS Shortcuts,
 // validates the user's personal webhook token, parses the expense, saves it to Cloud Firestore,
 // and returns a budgetAlert if that category has crossed its monthly alert threshold or limit.
 

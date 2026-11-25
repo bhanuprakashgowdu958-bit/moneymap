@@ -323,18 +323,18 @@ export default function AddExpense() {
 
       <form onSubmit={handleSubmit} className="card space-y-5">
         {/* Amount - hero field */}
-        <div className="text-center py-5 px-6 bg-gray-50 rounded-2xl relative overflow-hidden">
+        <div className="text-center py-5 px-6 bg-gray-50 rounded-2xl overflow-hidden">
           {/* Subtle OCR success or warning banner inside amount container */}
           {ocrDetected && ocrDetected.isReceipt === false ? (
-            <div className="absolute top-0 inset-x-0 bg-amber-500 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
+            <div className="-mx-6 -mt-5 mb-4 bg-amber-500 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
               <span>⚠️</span> Not recognized as a payment receipt — please enter the amount manually
             </div>
           ) : ocrDetected && sanitizeAmount(ocrDetected.amount) ? (
-            <div className="absolute top-0 inset-x-0 bg-emerald-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
+            <div className="-mx-6 -mt-5 mb-4 bg-emerald-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
               <span>✨</span> Auto-detected: {currency}{sanitizeAmount(ocrDetected.amount)} spent at <strong>{ocrDetected.title}</strong> ({CATEGORIES[ocrDetected.category]?.label || ocrDetected.category})
             </div>
           ) : ocrDetected && ocrDetected.title ? (
-            <div className="absolute top-0 inset-x-0 bg-blue-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
+            <div className="-mx-6 -mt-5 mb-4 bg-blue-600 text-white text-xs font-semibold py-1.5 px-3 flex items-center justify-center gap-1.5 shadow-sm">
               <span>📍</span> Detected: <strong>{ocrDetected.title}</strong> — please enter the amount below
             </div>
           ) : null}
@@ -349,7 +349,6 @@ export default function AddExpense() {
               placeholder="0"
               value={form.amount}
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)}
               min="0.01"
               step="0.01"
             />
@@ -399,7 +398,6 @@ export default function AddExpense() {
             placeholder="e.g. Zomato dinner, Uber ride, Blinkit..."
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-            onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300)}
           />
         </div>
 
@@ -463,7 +461,7 @@ export default function AddExpense() {
 
         {/* Receipt Upload & Auto-Scan (Cloudinary + Tesseract OCR) */}
         <div>
-          <label className="label flex items-center justify-between">
+          <label className="label flex flex-wrap items-center justify-between gap-1.5">
             <span>Receipt Photo or Payment Screenshot (Auto-Detects Amount)</span>
             <span className={`text-xs font-medium ${ocrDetected?.isAiVision || hasGeminiKey ? 'text-primary' : 'text-blue-600'}`}>
               {ocrDetected?.isAiVision ? '✨ Gemini AI Vision Active' : hasGeminiKey ? '✨ Gemini AI Vision Ready' : 'AI OCR Scanner Active'}

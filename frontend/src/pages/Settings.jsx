@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { uploadToCloudinary } from '../lib/cloudinary';
 import { getOrCreateWebhookToken, regenerateWebhookToken, isDemoUser } from '../lib/firestore';
-import { downloadMacroDroidGuidePdf, downloadIosGuidePdf } from '../lib/macrodroidPdf';
+import { downloadIosGuidePdf } from '../lib/shortcutsPdf';
 import { CATEGORIES } from '../lib/constants';
 import {
   isNativeAndroid,
@@ -39,8 +39,6 @@ export default function Settings() {
   const [testingWebhook, setTestingWebhook] = useState(false);
   const [testingGuard, setTestingGuard] = useState(false);
   const [guardCategory, setGuardCategory] = useState('food-delivery');
-  const [guardTab, setGuardTab] = useState('ios');
-  const [guideTab, setGuideTab] = useState('ios');
   const [showAdvancedAutomation, setShowAdvancedAutomation] = useState(false);
   const [nativeStatus, setNativeStatus] = useState(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -311,10 +309,10 @@ export default function Settings() {
             <div>
               <label className="label">Monthly Income ({form.currency})</label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">{form.currency}</span>
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 font-medium">{form.currency}</span>
                 <input
                   type="number"
-                  className="input-field pl-8"
+                  className={`input-field ${form.currency.length > 1 ? 'pl-14' : 'pl-8'}`}
                   placeholder="50000"
                   value={form.monthlyIncome}
                   onChange={(e) => setForm({ ...form, monthlyIncome: e.target.value })}
@@ -579,25 +577,25 @@ export default function Settings() {
                   <span>📲</span> MoneyMap Android App (Zero-Setup Auto-Track)
                 </h2>
                 <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-                  Want automatic UPI expense tracking and Swiggy/Zomato budget alerts without setting up MacroDroid? Install the MoneyMap Android APK and turn it on in 1 tap.
+                  Install the MoneyMap Android APK for built-in automatic UPI expense tracking and Swiggy/Zomato budget alerts in 1 tap.
                 </p>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <a
-                href="https://github.com/bhanuprakashgowdu958-bit/moneymap/actions/workflows/android-apk.yml"
+                href="https://github.com/bhanuprakashgowdu958-bit/moneymap/releases/latest/download/MoneyMap.apk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-1.5"
               >
-                ⬇️ Get Android APK Build
+                ⬇️ Download Android APK
               </a>
               <button
                 type="button"
                 onClick={() => setShowAdvancedAutomation((v) => !v)}
                 className="btn-secondary text-xs py-2 px-3.5"
               >
-                {showAdvancedAutomation ? 'Hide Manual Automation ▲' : 'Advanced: MacroDroid / iOS Shortcuts ▼'}
+                {showAdvancedAutomation ? 'Hide iOS / Webhook Setup ▲' : 'iPhone Shortcuts / Webhook ▼'}
               </button>
             </div>
           </div>
@@ -663,63 +661,33 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* 60-Second Setup Guide Tabs */}
+            {/* 60-Second iPhone Shortcuts Setup Guide */}
             <div className="bg-white rounded-xl border border-gray-200 p-3.5">
-              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 mb-3">
-                <button
-                  type="button"
-                  onClick={() => setGuideTab('ios')}
-                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
-                    guideTab === 'ios' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                   iPhone
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGuideTab('android')}
-                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
-                    guideTab === 'android' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  🤖 Android
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <span className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white">
+                   iPhone Shortcuts Setup
+                </span>
                 <button
                   type="button"
                   disabled={!webhookUrl}
                   onClick={() => {
-                    if (guideTab === 'ios') {
-                      downloadIosGuidePdf(webhookUrl, displayName || 'User');
-                      toast.success('iPhone Shortcuts Setup PDF downloaded! 📄');
-                    } else {
-                      downloadMacroDroidGuidePdf(webhookUrl, displayName || 'User');
-                      toast.success('MacroDroid Setup Guide PDF downloaded! 📄');
-                    }
+                    downloadIosGuidePdf(webhookUrl, displayName || 'User');
+                    toast.success('iPhone Shortcuts Setup PDF downloaded! 📄');
                   }}
-                  className="col-span-2 sm:col-span-1 sm:ml-auto text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  title={`Download complete step-by-step ${guideTab === 'ios' ? 'iPhone Shortcuts' : 'Android MacroDroid'} PDF guide`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  title="Download complete step-by-step iPhone Shortcuts PDF guide"
                 >
-                  <span>📄</span> Download {guideTab === 'ios' ? 'iOS' : 'Android'} PDF
+                  <span>📄</span> Download iOS PDF
                 </button>
               </div>
 
-              {guideTab === 'ios' ? (
-                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
-                  <li>Open the built-in <strong>Shortcuts</strong> app → <strong>Automation</strong> → <strong>+</strong>.</li>
-                  <li>Choose <strong>Message</strong> → Message Contains <code className="bg-gray-100 px-1 rounded">debited</code> → <strong>Run Immediately</strong>.</li>
-                  <li>Add action: <strong>Get Contents of URL</strong> → paste your Webhook URL above.</li>
-                  <li>Set Method to <strong>POST</strong>, Request Body to <strong>JSON</strong>, key <code className="bg-gray-100 px-1 rounded">text</code> = <strong>Shortcut Input</strong>.</li>
-                  <li>Optional: Read <code className="bg-gray-100 px-1 rounded">budgetAlert</code> from the response and show a notification if not empty.</li>
-                </ol>
-              ) : (
-                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
-                  <li>Install <strong>MacroDroid</strong> (or SMS Forwarder) from Play Store.</li>
-                  <li>Trigger: <strong>SMS Received</strong> (contains <code className="bg-gray-100 px-1 rounded">debited</code> or <code className="bg-gray-100 px-1 rounded">UPI</code>).</li>
-                  <li>Action: <strong>HTTP Request (POST)</strong> → paste your Webhook URL above.</li>
-                  <li>Content-Type <code className="bg-gray-100 px-1 rounded">text/plain</code>, Body: <code className="bg-gray-100 px-1 rounded">[sms_message]</code>.</li>
-                  <li>The response includes <code className="bg-gray-100 px-1 rounded">budgetAlert</code> whenever that category crosses 80% or 100%.</li>
-                </ol>
-              )}
+              <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                <li>Open the built-in <strong>Shortcuts</strong> app → <strong>Automation</strong> → <strong>+</strong>.</li>
+                <li>Choose <strong>Message</strong> → Message Contains <code className="bg-gray-100 px-1 rounded">debited</code> → <strong>Run Immediately</strong>.</li>
+                <li>Add action: <strong>Get Contents of URL</strong> → paste your Webhook URL above.</li>
+                <li>Set Method to <strong>POST</strong>, Request Body to <strong>JSON</strong>, key <code className="bg-gray-100 px-1 rounded">text</code> = <strong>Shortcut Input</strong>.</li>
+                <li>Optional: Read <code className="bg-gray-100 px-1 rounded">budgetAlert</code> from the response and show a notification if not empty.</li>
+              </ol>
             </div>
           </div>
         )}
@@ -793,41 +761,18 @@ export default function Settings() {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-3.5">
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <button
-                  type="button"
-                  onClick={() => setGuardTab('ios')}
-                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
-                    guardTab === 'ios' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
+              <div className="mb-2.5">
+                <span className="inline-block text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white">
                    iPhone (App Open)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGuardTab('android')}
-                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
-                    guardTab === 'android' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  🤖 Android (App Open)
-                </button>
+                </span>
               </div>
 
-              {guardTab === 'ios' ? (
-                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
-                  <li>Open <strong>Shortcuts</strong> → <strong>Automation</strong> → <strong>+</strong> → choose <strong>App</strong>.</li>
-                  <li>Select <strong>Swiggy</strong>, <strong>Zomato</strong>, etc. → choose <strong>Is Opened</strong> → <strong>Run Immediately</strong>.</li>
-                  <li>Add <strong>Get Contents of URL</strong> (GET) with your Check URL above.</li>
-                  <li>Add <strong>If</strong> <em>Contents of URL</em> <strong>has any value</strong> → <strong>Show Notification</strong> (or <strong>Show Alert</strong>) with <em>Contents of URL</em>.</li>
-                </ol>
-              ) : (
-                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
-                  <li>In <strong>MacroDroid</strong>, tap <strong>Add Macro</strong> → Trigger: <strong>Applications → Application Launched</strong> (Swiggy, Zomato).</li>
-                  <li>Action 1: <strong>HTTP Request (GET)</strong> → paste Check URL above → save response to local string variable <code className="bg-gray-100 px-1 rounded">alert_msg</code>.</li>
-                  <li>Action 2: <strong>If</strong> <code className="bg-gray-100 px-1 rounded">[lv=alert_msg]</code> is not empty → <strong>Display Notification</strong> (or Popup Dialog) showing <code className="bg-gray-100 px-1 rounded">[lv=alert_msg]</code>.</li>
-                </ol>
-              )}
+              <ol className="text-xs text-gray-600 space-y-1.5 list-decimal list-inside">
+                <li>Open <strong>Shortcuts</strong> → <strong>Automation</strong> → <strong>+</strong> → choose <strong>App</strong>.</li>
+                <li>Select <strong>Swiggy</strong>, <strong>Zomato</strong>, etc. → choose <strong>Is Opened</strong> → <strong>Run Immediately</strong>.</li>
+                <li>Add <strong>Get Contents of URL</strong> (GET) with your Check URL above.</li>
+                <li>Add <strong>If</strong> <em>Contents of URL</em> <strong>has any value</strong> → <strong>Show Notification</strong> (or <strong>Show Alert</strong>) with <em>Contents of URL</em>.</li>
+              </ol>
             </div>
           </div>
         )}
