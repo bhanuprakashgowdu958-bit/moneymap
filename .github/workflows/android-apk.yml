@@ -41,7 +41,7 @@ jobs:
       - name: Install frontend dependencies & sync Capacitor
         working-directory: frontend
         run: |
-          npm ci
+          npm install --no-audit --no-fund
           npm run build
           npx cap sync android
 
