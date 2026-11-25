@@ -55,14 +55,14 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4 py-8">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-3xl font-bold text-white">M</span>
+        <div className="text-center mb-5 sm:mb-8">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-lg">
+            <span className="text-2xl sm:text-3xl font-bold text-white">M</span>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">MoneyMap</h1>
-          <p className="text-gray-500 mt-1">Start tracking every rupee today</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">MoneyMap</h1>
+          <p className="text-gray-500 text-sm sm:text-base mt-1">Start tracking every rupee today</p>
         </div>
 
         <div className="card">
@@ -84,6 +84,8 @@ export default function Register() {
               </span>
               <input
                 type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
                 ref={phoneInputRef}
                 className={`input-field pl-16 text-sm bg-white ${
                   phoneError ? 'border-red-500 ring-2 ring-red-100 bg-red-50/30' : ''

@@ -94,11 +94,11 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
           <button
             type="button"
             onClick={handleJumpToday}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+            className="text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors active:scale-95"
           >
             Today
           </button>
@@ -106,18 +106,18 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
             <button
               type="button"
               onClick={() => setCurrentMonth((m) => subMonths(m, 1))}
-              className="p-1.5 rounded-lg hover:bg-white text-gray-600 transition-all"
+              className="p-2 sm:p-1.5 rounded-lg hover:bg-white text-gray-600 transition-all"
               aria-label="Previous month"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="text-xs font-bold text-gray-800 px-3 min-w-[100px] text-center">
+            <span className="text-xs font-bold text-gray-800 px-2.5 sm:px-3 min-w-[92px] sm:min-w-[100px] text-center">
               {format(currentMonth, 'MMM yyyy')}
             </span>
             <button
               type="button"
               onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-              className="p-1.5 rounded-lg hover:bg-white text-gray-600 transition-all"
+              className="p-2 sm:p-1.5 rounded-lg hover:bg-white text-gray-600 transition-all"
               aria-label="Next month"
             >
               <ChevronRight className="w-4 h-4" />
@@ -183,11 +183,11 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
                     setSelectedDate(day);
                     if (!inMonth) setCurrentMonth(startOfMonth(day));
                   }}
-                  className={`relative h-11 sm:h-12 rounded-lg border p-1 flex flex-col items-center justify-between transition-all ${cellBg}`}
+                  className={`relative h-12 rounded-lg border p-1 flex flex-col items-center justify-between transition-all active:scale-95 ${cellBg}`}
                 >
                   <div className="w-full flex items-center justify-between px-0.5">
                     <span
-                      className={`text-xs font-semibold leading-none ${
+                      className={`text-[11px] sm:text-xs font-semibold leading-none ${
                         isSelected
                           ? 'text-white'
                           : isToday
@@ -206,12 +206,12 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
 
                   {daySpend > 0 ? (
                     <span
-                      className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-md truncate max-w-full ${pillClass}`}
+                      className={`text-[9px] sm:text-[10px] leading-tight px-1 py-0.5 rounded-md truncate max-w-full tabular-nums ${pillClass}`}
                     >
                       {formatCompactAmount(daySpend, currency)}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-transparent select-none">-</span>
+                    <span className="text-[9px] text-transparent select-none">-</span>
                   )}
                 </button>
               );
@@ -303,7 +303,7 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
           {/* Quick Add for Selected Date */}
           <Link
             to={`/add-expense?date=${selectedKey}`}
-            className="mt-2 w-full py-2.5 px-3 rounded-xl bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 text-xs font-semibold text-blue-600 flex items-center justify-center gap-1.5 transition-all"
+            className="mt-2 w-full min-h-[44px] py-2.5 px-3 rounded-xl bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 text-xs font-semibold text-blue-600 flex items-center justify-center gap-1.5 transition-all active:scale-95"
           >
             <Plus className="w-3.5 h-3.5" />
             Add expense for {format(selectedDate, 'd MMM')}

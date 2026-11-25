@@ -119,25 +119,25 @@ export default function Settings() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl mx-auto space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Manage your profile, currency, and preferences</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Manage your profile, currency, and preferences</p>
       </div>
 
       {/* Avatar & Cloudinary Integration */}
       <div className="card">
         <h2 className="text-base font-semibold text-gray-900 mb-4">Profile Photo</h2>
-        <div className="flex items-center gap-5">
-          <div className="relative">
+        <div className="flex items-center gap-4 sm:gap-5">
+          <div className="relative flex-shrink-0">
             {photoURL ? (
               <img
                 src={photoURL}
                 alt={displayName}
-                className="w-20 h-20 rounded-2xl object-cover border-2 border-blue-100 shadow-sm"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-blue-100 shadow-sm"
               />
             ) : (
-              <div className="w-20 h-20 rounded-2xl bg-blue-600 text-white flex items-center justify-center text-2xl font-bold shadow-sm">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-blue-600 text-white flex items-center justify-center text-2xl font-bold shadow-sm">
                 {displayName ? displayName.charAt(0).toUpperCase() : 'U'}
               </div>
             )}
@@ -148,7 +148,7 @@ export default function Settings() {
             )}
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <input
               type="file"
               ref={fileInputRef}
@@ -160,9 +160,9 @@ export default function Settings() {
               type="button"
               disabled={uploadingAvatar}
               onClick={() => fileInputRef.current?.click()}
-              className="btn-secondary text-sm py-2 px-4 inline-flex items-center gap-2"
+              className="btn-secondary w-full sm:w-auto text-sm py-2 px-4 inline-flex items-center justify-center gap-2"
             >
-              <span>📷</span> Upload to Cloudinary
+              <span>📷</span> Upload Photo
             </button>
             <p className="text-xs text-gray-400 mt-1.5">
               JPG, PNG, WebP up to 5MB. Hosted securely on Cloudinary CDN.
@@ -243,7 +243,7 @@ export default function Settings() {
           <button
             type="submit"
             disabled={saving}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2"
           >
             {saving ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Saving...</>
@@ -282,23 +282,23 @@ export default function Settings() {
                   type="text"
                   readOnly
                   value={webhookUrl || 'Generating...'}
-                  className="input-field text-xs font-mono bg-gray-50 text-gray-700"
+                  className="input-field min-w-0 flex-1 text-xs font-mono bg-gray-50 text-gray-700"
                 />
                 <button
                   type="button"
                   onClick={handleCopyWebhook}
                   disabled={!webhookUrl}
-                  className="btn-primary text-xs whitespace-nowrap px-3.5"
+                  className="btn-primary text-xs whitespace-nowrap px-3.5 flex-shrink-0"
                 >
                   📋 Copy
                 </button>
               </div>
-              <div className="flex items-center justify-between mt-2 text-xs">
+              <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
                 <button
                   type="button"
                   onClick={handleTestWebhook}
                   disabled={testingWebhook || !webhookUrl}
-                  className="text-emerald-700 hover:underline font-semibold"
+                  className="text-emerald-700 hover:underline font-semibold py-1"
                 >
                   {testingWebhook ? 'Sending test...' : '⚡ Send Test SMS'}
                 </button>
@@ -306,7 +306,7 @@ export default function Settings() {
                   type="button"
                   onClick={handleRegenerateWebhook}
                   disabled={loadingWebhook}
-                  className="text-gray-500 hover:text-red-600"
+                  className="text-gray-500 hover:text-red-600 py-1"
                 >
                   {loadingWebhook ? 'Regenerating...' : '🔄 Regenerate URL'}
                 </button>
@@ -315,24 +315,24 @@ export default function Settings() {
 
             {/* 60-Second Setup Guide Tabs */}
             <div className="bg-white rounded-xl border border-gray-200 p-3.5">
-              <div className="flex flex-wrap items-center gap-2 mb-3">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 mb-3">
                 <button
                   type="button"
                   onClick={() => setGuideTab('ios')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
+                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
                     guideTab === 'ios' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
-                   iPhone (Shortcuts)
+                   iPhone
                 </button>
                 <button
                   type="button"
                   onClick={() => setGuideTab('android')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
+                  className={`text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg transition-all text-center ${
                     guideTab === 'android' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
-                  🤖 Android (MacroDroid)
+                  🤖 Android
                 </button>
                 <button
                   type="button"
@@ -346,7 +346,7 @@ export default function Settings() {
                       toast.success('MacroDroid Setup Guide PDF downloaded! 📄');
                     }
                   }}
-                  className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  className="col-span-2 sm:col-span-1 sm:ml-auto text-xs font-semibold px-3 py-2 sm:py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                   title={`Download complete step-by-step ${guideTab === 'ios' ? 'iPhone Shortcuts' : 'Android MacroDroid'} PDF guide`}
                 >
                   <span>📄</span> Download {guideTab === 'ios' ? 'iOS' : 'Android'} PDF
@@ -406,7 +406,7 @@ export default function Settings() {
         <p className="text-xs text-gray-500 mb-4">Sign out of MoneyMap on this device.</p>
         <button
           onClick={() => { if (window.confirm('Are you sure you want to log out?')) logout(); }}
-          className="btn-danger flex items-center gap-2"
+          className="btn-danger w-full sm:w-auto flex items-center justify-center gap-2"
         >
           🚪 Sign Out from MoneyMap
         </button>

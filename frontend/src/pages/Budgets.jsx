@@ -72,26 +72,26 @@ export default function Budgets() {
   const totalSpent    = budgets.reduce((s, b) => s + (b.spent || 0), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Budget Manager</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Set limits, stay on track</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Budget Manager</h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Set limits, stay on track</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary self-start sm:self-auto flex items-center gap-2">
+        <button onClick={() => setShowForm(!showForm)} className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2">
           <span>{showForm ? '✕' : '+'}</span> {showForm ? 'Cancel' : 'Set Budget'}
         </button>
       </div>
 
       {budgets.length > 0 && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="card text-center">
-            <p className="text-sm text-gray-500">Total Budgeted</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{formatCurrency(totalBudgeted, currency)}</p>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          <div className="card p-3.5 sm:p-6 text-center min-w-0">
+            <p className="text-xs sm:text-sm text-gray-500">Total Budgeted</p>
+            <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 tabular-nums truncate">{formatCurrency(totalBudgeted, currency)}</p>
           </div>
-          <div className="card text-center">
-            <p className="text-sm text-gray-500">Total Spent</p>
-            <p className={`text-2xl font-bold mt-1 ${totalSpent > totalBudgeted ? 'text-red-600' : 'text-gray-900'}`}>
+          <div className="card p-3.5 sm:p-6 text-center min-w-0">
+            <p className="text-xs sm:text-sm text-gray-500">Total Spent</p>
+            <p className={`text-lg sm:text-2xl font-bold mt-1 tabular-nums truncate ${totalSpent > totalBudgeted ? 'text-red-600' : 'text-gray-900'}`}>
               {formatCurrency(totalSpent, currency)}
             </p>
           </div>
@@ -150,15 +150,15 @@ export default function Budgets() {
             const remaining = Math.max(b.limit - (b.spent || 0), 0);
             return (
               <div key={b.id} className="card hover:shadow-card-hover transition-all duration-300">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl" style={{ backgroundColor: cat?.bgColor }}>{cat?.icon}</div>
-                    <div>
-                      <p className="font-semibold text-gray-900">{cat?.label}</p>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl flex-shrink-0" style={{ backgroundColor: cat?.bgColor }}>{cat?.icon}</div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 truncate">{cat?.label}</p>
                       <p className={`text-xs font-semibold ${status.color}`}>{status.label}</p>
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(b.id)} className="text-xs text-red-400 hover:text-red-600 transition-colors">Remove</button>
+                  <button onClick={() => handleDelete(b.id)} className="text-xs text-red-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors flex-shrink-0">Remove</button>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-3 mb-2">
                   <div className={`h-3 rounded-full transition-all duration-700 ${status.bg}`} style={{ width: `${pct}%` }} />

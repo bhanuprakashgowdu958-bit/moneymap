@@ -19,14 +19,16 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Toaster
-          position="top-right"
+          position="top-center"
+          containerStyle={{ top: 14 }}
           toastOptions={{
             style: {
-              borderRadius: '12px',
+              borderRadius: '14px',
               fontFamily: 'Inter, sans-serif',
-              fontSize: '14px',
+              fontSize: '13px',
               fontWeight: '500',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.12)'
+              maxWidth: '92vw',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
             },
             success: { style: { background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' } },
             error: { style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' } }

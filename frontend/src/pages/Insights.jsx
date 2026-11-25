@@ -47,13 +47,13 @@ export default function Insights() {
   const changeIsUp = total > lastMonth;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Insights</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Understand your spending patterns</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Insights</h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Understand your spending patterns</p>
         </div>
-        <select className="input-field w-auto text-sm" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+        <select className="input-field w-full sm:w-auto text-sm py-2.5" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
           {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
@@ -63,28 +63,28 @@ export default function Insights() {
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
         </div>
       ) : stats.length === 0 ? (
-        <div className="card text-center py-16">
+        <div className="card text-center py-12 sm:py-16">
           <div className="text-5xl mb-4">💡</div>
           <h3 className="text-lg font-semibold text-gray-700">No data for this month</h3>
           <p className="text-gray-400 text-sm mt-1">Add some expenses to see insights</p>
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="card text-center"><p className="text-xs text-gray-500 mb-1">Total Spent</p><p className="text-xl font-bold text-gray-900">{formatCurrency(total, currency)}</p></div>
-            <div className="card text-center"><p className="text-xs text-gray-500 mb-1">Categories</p><p className="text-xl font-bold text-gray-900">{stats.length}</p></div>
-            <div className="card text-center">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Total Spent</p><p className="text-lg sm:text-xl font-bold text-gray-900 tabular-nums truncate">{formatCurrency(total, currency)}</p></div>
+            <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Categories</p><p className="text-lg sm:text-xl font-bold text-gray-900 tabular-nums">{stats.length}</p></div>
+            <div className="card p-3.5 sm:p-5 text-center min-w-0">
               <p className="text-xs text-gray-500 mb-1">Top Category</p>
               <p className="text-xl">{CATEGORIES[topCategory?._id]?.icon}</p>
-              <p className="text-xs font-semibold text-gray-700 mt-0.5">{CATEGORIES[topCategory?._id]?.label}</p>
+              <p className="text-xs font-semibold text-gray-700 mt-0.5 truncate">{CATEGORIES[topCategory?._id]?.label}</p>
             </div>
-            <div className="card text-center"><p className="text-xs text-gray-500 mb-1">Transactions</p><p className="text-xl font-bold text-gray-900">{stats.reduce((s, c) => s + c.count, 0)}</p></div>
+            <div className="card p-3.5 sm:p-5 text-center min-w-0"><p className="text-xs text-gray-500 mb-1">Transactions</p><p className="text-lg sm:text-xl font-bold text-gray-900 tabular-nums">{stats.reduce((s, c) => s + c.count, 0)}</p></div>
           </div>
 
-          <div className="card">
-            <h2 className="text-base font-semibold text-gray-900 mb-4">Spending by Category</h2>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={barData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+          <div className="card min-w-0">
+            <h2 className="text-base font-semibold text-gray-900 mb-3 sm:mb-4">Spending by Category</h2>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={barData} margin={{ top: 5, right: 6, left: -12, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${currency}${(v/1000).toFixed(0)}k`} />
@@ -105,16 +105,16 @@ export default function Insights() {
                 return (
                   <div key={s._id} className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ backgroundColor: cat?.bgColor }}>{cat?.icon}</div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-gray-700">{cat?.label}</span>
-                        <span className="text-sm font-bold text-gray-900">{formatCurrency(s.total, currency)}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-sm font-medium text-gray-700 truncate">{cat?.label}</span>
+                        <span className="text-sm font-bold text-gray-900 tabular-nums flex-shrink-0">{formatCurrency(s.total, currency)}</span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-1.5">
                         <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: cat?.color }} />
                       </div>
                     </div>
-                    <span className="text-xs text-gray-400 w-10 text-right">{pct}%</span>
+                    <span className="text-xs text-gray-400 w-9 text-right tabular-nums flex-shrink-0">{pct}%</span>
                   </div>
                 );
               })}

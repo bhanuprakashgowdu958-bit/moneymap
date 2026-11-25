@@ -18,15 +18,15 @@ const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent
 
 function StatCard({ icon, label, value, sub, subColor = 'text-gray-500', bgColor = 'bg-blue-50' }) {
   return (
-    <div className="card hover:shadow-card-hover transition-shadow duration-300">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-gray-500 font-medium">{label}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-          {sub && <p className={`text-xs mt-1 font-medium ${subColor}`}>{sub}</p>}
+    <div className="card p-3.5 sm:p-5 hover:shadow-card-hover transition-shadow duration-300 min-w-0">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs sm:text-sm text-gray-500 font-medium truncate">{label}</p>
+          <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 tabular-nums truncate">{value}</p>
+          {sub && <p className={`text-[11px] sm:text-xs mt-1 font-medium truncate ${subColor}`}>{sub}</p>}
         </div>
-        <div className={`w-11 h-11 ${bgColor} rounded-xl flex items-center justify-center`}>
-          <span className="text-xl">{icon}</span>
+        <div className={`w-9 h-9 sm:w-11 sm:h-11 ${bgColor} rounded-xl flex items-center justify-center flex-shrink-0`}>
+          <span className="text-base sm:text-xl">{icon}</span>
         </div>
       </div>
     </div>
@@ -157,25 +157,25 @@ export default function Dashboard() {
   const greeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Good {greeting}, {displayName.split(' ')[0]}! 👋</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Here's your financial overview</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Good {greeting}, {displayName.split(' ')[0]}! 👋</h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Here's your financial overview</p>
         </div>
-        <Link to="/add-expense" className="btn-primary self-start sm:self-auto flex items-center gap-2">
+        <Link to="/add-expense" className="btn-primary hidden sm:inline-flex items-center gap-2 self-auto">
           <span>➕</span> Add Expense
         </Link>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard icon="💸" label="Spent This Month" value={formatCurrency(stats.total, currency)}
           sub={lastMonth > 0 ? `${changeIsUp ? '↑' : '↓'} ${changeAbs}% vs last month` : 'First month tracking'}
           subColor={changeIsUp ? 'text-red-500' : 'text-emerald-500'} bgColor="bg-red-50" />
         <StatCard icon="💰" label="Today's Spending" value={formatCurrency(todayTotal, currency)} sub="All categories" bgColor="bg-amber-50" />
         <StatCard icon="✅" label="Safe to Spend" value={formatCurrency(safeToSpend, currency)}
-          sub={safePercent !== null ? `${safePercent}% of income remaining` : 'Set income in settings'}
+          sub={safePercent !== null ? `${safePercent}% of income left` : 'Set income in settings'}
           subColor={safePercent !== null && safePercent < 20 ? 'text-red-500' : 'text-emerald-500'} bgColor="bg-emerald-50" />
         <StatCard icon="📅" label="Last Month" value={formatCurrency(lastMonth, currency)} sub="Previous period" bgColor="bg-purple-50" />
       </div>
@@ -184,12 +184,12 @@ export default function Dashboard() {
       <SpendingCalendar expenses={allExpenses} currency={currency} />
 
       {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="card lg:col-span-2">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Weekly Spending (Last 7 Days)</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="card lg:col-span-2 min-w-0">
+          <h2 className="text-base font-semibold text-gray-900 mb-3 sm:mb-4">Weekly Spending (Last 7 Days)</h2>
           {areaData.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={areaData}>
+              <AreaChart data={areaData} margin={{ top: 5, right: 8, left: -16, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorAmt" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#2563eb" stopOpacity={0.15} />
@@ -206,8 +206,8 @@ export default function Dashboard() {
           ) : <div className="h-48 flex items-center justify-center text-gray-400 text-sm">No spending data for the past 7 days</div>}
         </div>
 
-        <div className="card">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Category Split</h2>
+        <div className="card min-w-0">
+          <h2 className="text-base font-semibold text-gray-900 mb-3 sm:mb-4">Category Split</h2>
           {pieData.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={160}>
@@ -235,8 +235,8 @@ export default function Dashboard() {
       </div>
 
       {/* Budget & Recent */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+        <div className="card min-w-0">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-gray-900">Budget Status</h2>
             <Link to="/budgets" className="text-sm text-blue-600 font-semibold hover:underline">Manage →</Link>

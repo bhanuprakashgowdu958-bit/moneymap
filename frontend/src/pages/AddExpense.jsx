@@ -213,31 +213,31 @@ export default function AddExpense() {
   const selectedCat = CATEGORIES[form.category];
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl mx-auto space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Add Expense</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Track every rupee automatically or manually</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Add Expense</h1>
+        <p className="text-gray-500 text-xs sm:text-sm mt-0.5">Track every rupee automatically or manually</p>
       </div>
 
       {/* ⚡ MAGIC SMS / BANK ALERT PARSER CARD */}
-      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-5 text-white shadow-md">
-        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+      <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl p-4 sm:p-5 text-white shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2.5 gap-2.5">
           <div className="flex items-center gap-2">
             <span className="text-xl">✨</span>
             <span className="font-bold text-sm tracking-wide">Magic Auto-Fill Bar</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="text-xs bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 backdrop-blur-sm shadow-sm"
+              className="text-xs bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-2.5 sm:py-1.5 rounded-xl sm:rounded-lg transition-all flex items-center justify-center gap-1.5 backdrop-blur-sm shadow-sm active:scale-95"
             >
-              📷 Upload Screenshot / Bill
+              📷 Scan Receipt
             </button>
             <button
               type="button"
               onClick={handlePasteClipboard}
-              className="text-xs bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 backdrop-blur-sm shadow-sm"
+              className="text-xs bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-2.5 sm:py-1.5 rounded-xl sm:rounded-lg transition-all flex items-center justify-center gap-1.5 backdrop-blur-sm shadow-sm active:scale-95"
             >
               📋 Paste SMS
             </button>
@@ -300,11 +300,12 @@ export default function AddExpense() {
           ) : null}
 
           <p className="text-sm text-gray-500 mb-2 font-medium mt-1">Amount Spent</p>
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-3xl font-bold text-gray-400">{currency}</span>
+          <div className="flex items-center justify-center gap-1.5">
+            <span className="text-2xl sm:text-3xl font-bold text-gray-400">{currency}</span>
             <input
               type="number"
-              className="text-5xl font-bold text-gray-900 bg-transparent border-none outline-none text-center w-52 placeholder:text-gray-300"
+              inputMode="decimal"
+              className="text-4xl sm:text-5xl font-bold text-gray-900 bg-transparent border-none outline-none text-center w-full max-w-[190px] sm:max-w-[210px] placeholder:text-gray-300 tabular-nums"
               placeholder="0"
               value={form.amount}
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
@@ -380,13 +381,13 @@ export default function AddExpense() {
                     };
                   })
                 }
-                className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-xs font-medium ${
+                className={`flex flex-col items-center justify-center gap-1 p-2.5 sm:p-3 min-h-[72px] rounded-xl border-2 transition-all text-[11px] sm:text-xs font-medium active:scale-95 ${
                   form.category === key
                     ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm scale-[1.02]'
                     : 'border-gray-100 bg-gray-50 text-gray-600 hover:border-gray-200 hover:bg-white'
                 }`}
               >
-                <span className="text-2xl">{cat.icon}</span>
+                <span className="text-xl sm:text-2xl">{cat.icon}</span>
                 <span className="text-center leading-tight">{cat.label}</span>
               </button>
             ))}
@@ -394,7 +395,7 @@ export default function AddExpense() {
         </div>
 
         {/* Date and Payment */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div>
             <label className="label">Date</label>
             <input
