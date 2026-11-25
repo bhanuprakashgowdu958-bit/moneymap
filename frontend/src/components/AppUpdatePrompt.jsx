@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { isNativeAndroid } from '../lib/nativeBridge';
+import { getNativeStatus, installNativeApkUpdate, isNativeAndroid } from '../lib/nativeBridge';
 import {
   applyOtaUpdate,
   checkAndPrepareOtaUpdate,
@@ -60,8 +60,54 @@ function saveLastCheckTime(ts) {
 export default function AppUpdatePrompt() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [applying, setApplying] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null);
   const [dismissedVersion, setDismissedVersion] = useState('');
   const checkingRef = useRef(false);
+  const awaitingInstallPermRef = useRef(false);
+
+  const startApkInstall = useCallback(async (info) => {
+    if (!info) return;
+    const apkUrl = info.remote?.apkUrl || DEFAULT_APK_URL;
+    const remoteVer = info.remote?.version || '';
+    setApplying(true);
+    setDownloadProgress(0);
+    try {
+      const res = await installNativeApkUpdate(apkUrl, (pct) => {
+        setDownloadProgress(pct);
+      });
+      if (res?.needsPermission) {
+        awaitingInstallPermRef.current = true;
+        setApplying(false);
+        setDownloadProgress(null);
+        toast('Allow "Install unknown apps" once — update will start automatically when you return!', {
+          icon: '🔓',
+          duration: 5000,
+        });
+        return;
+      }
+      if (res?.started) {
+        saveSnooze(remoteVer);
+        setApplying(false);
+        setDownloadProgress(null);
+      }
+    } catch (err) {
+      setApplying(false);
+      setDownloadProgress(null);
+      const msg = err?.message || '';
+      if (msg.toLowerCase().includes('not implemented') || msg.toLowerCase().includes('unimplemented')) {
+        saveSnooze(remoteVer);
+        window.open(apkUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      toast.error(msg || 'Download failed. Opening browser fallback...');
+      window.open(apkUrl, '_blank', 'noopener,noreferrer');
+    }
+  }, []);
+
+  const updateInfoRef = useRef(null);
+  useEffect(() => {
+    updateInfoRef.current = updateInfo;
+  }, [updateInfo]);
 
   useEffect(() => {
     if (!isNativeAndroid()) return;
@@ -104,11 +150,25 @@ export default function AppUpdatePrompt() {
     // Check quietly on startup (respecting the 4-hour interval)
     runSilentCheck();
 
-    // Re-check only if returning to foreground after the 4-hour interval
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        runSilentCheck();
+    // Auto-resume APK install if returning from "Allow unknown apps" settings,
+    // otherwise check quietly only when the 4-hour interval has elapsed.
+    const handleVisibility = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      if (awaitingInstallPermRef.current && updateInfoRef.current) {
+        try {
+          const st = await getNativeStatus();
+          if (st?.canRequestPackageInstalls) {
+            awaitingInstallPermRef.current = false;
+            startApkInstall(updateInfoRef.current);
+            return;
+          }
+        } catch {
+          // User can tap Update Now manually
+        }
       }
+
+      runSilentCheck();
     };
 
     // Allow manual "Check for Updates" from Settings to show the prompt immediately
@@ -116,6 +176,7 @@ export default function AppUpdatePrompt() {
       const result = e.detail;
       if (result && (result.status === 'ready' || result.status === 'native_required')) {
         setDismissedVersion('');
+        setDownloadProgress(null);
         setUpdateInfo(result);
       }
     };
@@ -127,9 +188,11 @@ export default function AppUpdatePrompt() {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener(OTA_READY_EVENT, handleManualTrigger);
     };
-  }, []);
+  }, [startApkInstall]);
 
-  if (!updateInfo) return null;
+  if (!updateInfo) {
+    return null;
+  }
 
   const remoteVersion = updateInfo.remote?.version || '';
   const isForce = Boolean(updateInfo.remote?.forceUpdate);
@@ -138,12 +201,13 @@ export default function AppUpdatePrompt() {
   }
 
   const handleDismiss = () => {
+    awaitingInstallPermRef.current = false;
     saveSnooze(remoteVersion);
     setDismissedVersion(remoteVersion);
     setUpdateInfo(null);
   };
 
-  const handleApply = async () => {
+  const handleApplyOta = async () => {
     if (updateInfo.status !== 'ready' || !updateInfo.bundle?.id) return;
     setApplying(true);
     try {
@@ -174,12 +238,27 @@ export default function AppUpdatePrompt() {
             </h3>
             <p className="text-xs text-gray-500 mt-1 leading-relaxed">
               {updateInfo.status === 'native_required'
-                ? 'A major MoneyMap update is ready. Install the latest APK once to get all new features and improvements.'
+                ? 'A major MoneyMap update is ready. Tap Update Now to download and install right inside the app.'
                 : updateInfo.remote?.notes ||
                   'All latest improvements are downloaded and ready to apply in one tap.'}
             </p>
           </div>
         </div>
+
+        {updateInfo.status === 'native_required' && downloadProgress !== null && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-blue-700 font-semibold">
+              <span>Downloading update...</span>
+              <span className="tabular-nums">{downloadProgress}%</span>
+            </div>
+            <div className="w-full h-2 bg-blue-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-600 transition-all duration-200 rounded-full"
+                style={{ width: `${Math.max(5, downloadProgress)}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {updateInfo.status === 'ready' && (
           <div className="bg-blue-50/70 border border-blue-100 rounded-xl px-3 py-2 text-[11px] text-blue-800">
@@ -192,7 +271,7 @@ export default function AppUpdatePrompt() {
             <>
               <button
                 type="button"
-                onClick={handleApply}
+                onClick={handleApplyOta}
                 disabled={applying}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 text-sm"
               >
@@ -218,15 +297,21 @@ export default function AppUpdatePrompt() {
             </>
           ) : (
             <>
-              <a
-                href={updateInfo.remote?.apkUrl || DEFAULT_APK_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => saveSnooze(remoteVersion)}
-                className="btn-primary flex-1 flex items-center justify-center gap-2 text-sm text-center"
+              <button
+                type="button"
+                onClick={() => startApkInstall(updateInfo)}
+                disabled={applying}
+                className="btn-primary flex-1 flex items-center justify-center gap-2 text-sm"
               >
-                Download Update
-              </a>
+                {applying ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Downloading {downloadProgress ?? 0}%
+                  </>
+                ) : (
+                  'Update Now'
+                )}
+              </button>
               {!isForce && (
                 <button
                   type="button"

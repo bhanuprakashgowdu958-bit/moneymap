@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
@@ -20,6 +21,14 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @CapacitorPlugin(
     name = "MoneyMapNative",
@@ -35,10 +44,14 @@ import com.getcapacitor.annotation.PermissionCallback;
     }
 )
 public class MoneyMapNativePlugin extends Plugin {
+    private static final ExecutorService APK_EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final int MAX_REDIRECTS = 6;
+    private static final long MIN_APK_BYTES = 100 * 1024L;
 
     @Override
     public void load() {
         super.load();
+        cleanupOldApkCache();
         if (MoneyMapPrefs.isAppGuardEnabled(getContext()) && hasUsageStatsAccess(getContext())) {
             Intent svc = new Intent(getContext(), AppGuardService.class);
             ContextCompat.startForegroundService(getContext(), svc);
@@ -61,11 +74,163 @@ public class MoneyMapNativePlugin extends Plugin {
         ret.put("hasSmsPermission", hasSmsPermission(getContext()));
         ret.put("hasUsageAccess", hasUsageStatsAccess(getContext()));
         ret.put("hasPostNotifications", hasPostNotificationPermission(getContext()));
+        ret.put("canRequestPackageInstalls", canInstallPackages(getContext()));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(getContext()));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(getContext()));
         ret.put("appGuardEnabled", MoneyMapPrefs.isAppGuardEnabled(getContext()));
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void installApkUpdate(PluginCall call) {
+        String apkUrl = call.getString("apkUrl", "");
+        if (apkUrl == null || !apkUrl.startsWith("https://")) {
+            call.reject("Invalid APK download URL.");
+            return;
+        }
+
+        Context ctx = getContext();
+        if (!canInstallPackages(ctx)) {
+            Intent permIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+            permIntent.setData(Uri.parse("package:" + ctx.getPackageName()));
+            permIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(permIntent);
+
+            JSObject ret = new JSObject();
+            ret.put("started", false);
+            ret.put("needsPermission", true);
+            call.resolve(ret);
+            return;
+        }
+
+        APK_EXECUTOR.execute(() -> downloadAndLaunchInstaller(ctx, apkUrl, call));
+    }
+
+    private void downloadAndLaunchInstaller(Context ctx, String apkUrl, PluginCall call) {
+        HttpURLConnection conn = null;
+        File tempFile = null;
+        try {
+            File updatesDir = new File(ctx.getCacheDir(), "updates");
+            if (!updatesDir.exists() && !updatesDir.mkdirs()) {
+                call.reject("Could not create update cache folder.");
+                return;
+            }
+            tempFile = new File(updatesDir, "MoneyMap-update.apk.tmp");
+            File finalApk = new File(updatesDir, "MoneyMap-update.apk");
+
+            conn = openWithRedirects(apkUrl);
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) {
+                call.reject("APK download returned HTTP " + code);
+                return;
+            }
+
+            long totalBytes = conn.getContentLengthLong();
+            long downloaded = 0L;
+            int lastPct = -1;
+
+            try (InputStream in = conn.getInputStream();
+                 FileOutputStream out = new FileOutputStream(tempFile, false)) {
+                byte[] buffer = new byte[16 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                    downloaded += read;
+                    if (totalBytes > 0) {
+                        int pct = (int) Math.min(99, (downloaded * 100L) / totalBytes);
+                        if (pct != lastPct) {
+                            lastPct = pct;
+                            emitDownloadProgress(pct);
+                        }
+                    }
+                }
+                out.flush();
+            }
+
+            if (downloaded < MIN_APK_BYTES) {
+                if (tempFile.exists()) tempFile.delete();
+                call.reject("Downloaded file is too small to be a valid APK.");
+                return;
+            }
+
+            if (finalApk.exists()) finalApk.delete();
+            if (!tempFile.renameTo(finalApk)) {
+                call.reject("Failed to prepare APK file.");
+                return;
+            }
+
+            emitDownloadProgress(100);
+
+            Uri apkUri = FileProvider.getUriForFile(
+                ctx,
+                ctx.getPackageName() + ".fileprovider",
+                finalApk
+            );
+
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(installIntent);
+
+            JSObject ret = new JSObject();
+            ret.put("started", true);
+            ret.put("needsPermission", false);
+            call.resolve(ret);
+        } catch (Exception err) {
+            if (tempFile != null && tempFile.exists()) tempFile.delete();
+            call.reject("APK update failed: " + (err.getMessage() != null ? err.getMessage() : "unknown error"));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static HttpURLConnection openWithRedirects(String rawUrl) throws Exception {
+        String current = rawUrl;
+        for (int i = 0; i < MAX_REDIRECTS; i++) {
+            HttpURLConnection conn = (HttpURLConnection) new URL(current).openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setRequestProperty("User-Agent", "MoneyMap-Android-Updater");
+            int code = conn.getResponseCode();
+            if (code == HttpURLConnection.HTTP_MOVED_PERM
+                || code == HttpURLConnection.HTTP_MOVED_TEMP
+                || code == HttpURLConnection.HTTP_SEE_OTHER
+                || code == 307
+                || code == 308) {
+                String location = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (location == null || !location.startsWith("https://")) {
+                    throw new IllegalStateException("Invalid redirect target.");
+                }
+                current = location;
+                continue;
+            }
+            return conn;
+        }
+        throw new IllegalStateException("Too many redirects while downloading APK.");
+    }
+
+    private void emitDownloadProgress(int percent) {
+        JSObject data = new JSObject();
+        data.put("percent", percent);
+        notifyListeners("apkDownloadProgress", data);
+    }
+
+    private void cleanupOldApkCache() {
+        try {
+            File updatesDir = new File(getContext().getCacheDir(), "updates");
+            if (!updatesDir.isDirectory()) return;
+            File[] files = updatesDir.listFiles();
+            if (files == null) return;
+            long cutoff = System.currentTimeMillis() - (2 * 60 * 60 * 1000L);
+            for (File f : files) {
+                if (f.getName().endsWith(".tmp") || f.lastModified() < cutoff) {
+                    f.delete();
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     @PluginMethod
@@ -154,6 +319,11 @@ public class MoneyMapNativePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("granted", getPermissionState("sms") == PermissionState.GRANTED || hasSmsPermission(getContext()));
         call.resolve(ret);
+    }
+
+    private static boolean canInstallPackages(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+        return context.getPackageManager().canRequestPackageInstalls();
     }
 
     private static boolean hasSmsPermission(Context context) {

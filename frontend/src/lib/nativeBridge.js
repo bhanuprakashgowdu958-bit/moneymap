@@ -78,3 +78,20 @@ export async function requestNativeNotifications() {
   if (!isNativeAndroid()) return { granted: true };
   return MoneyMapNative.requestNotificationPermission();
 }
+
+export async function installNativeApkUpdate(apkUrl, onProgress) {
+  if (!isNativeAndroid()) return { started: false };
+  let listener = null;
+  if (typeof onProgress === 'function') {
+    listener = await MoneyMapNative.addListener('apkDownloadProgress', (data) => {
+      if (typeof data?.percent === 'number') onProgress(data.percent);
+    });
+  }
+  try {
+    return await MoneyMapNative.installApkUpdate({ apkUrl });
+  } finally {
+    if (listener && typeof listener.remove === 'function') {
+      listener.remove().catch(() => {});
+    }
+  }
+}
