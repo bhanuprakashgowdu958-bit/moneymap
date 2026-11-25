@@ -40,13 +40,17 @@ export default function Login() {
         toast.error('⚠️ No account found with this Google ID. Please create an account first!', {
           duration: 5000,
         });
-        navigate('/register');
+        navigate('/register', { state: { phone: cleaned } });
       } else if (err.code === 'auth/unauthorized-domain') {
         toast.error('⚠️ Domain not authorized in Firebase! Please add moneymap-pl9w.vercel.app in Firebase Console -> Authentication -> Settings -> Authorized domains.', {
           duration: 8000,
         });
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        toast('Google sign-in popup closed', { icon: 'ℹ️' });
+      } else if (
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'USER_CANCELLED' ||
+        err.message?.toLowerCase().includes('cancel')
+      ) {
+        toast('Google sign-in cancelled', { icon: 'ℹ️' });
       } else {
         toast.error(err.message || 'Google sign-in failed');
       }

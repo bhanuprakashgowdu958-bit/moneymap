@@ -167,44 +167,107 @@ export async function upsertUserProfile(uid, data) {
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
       const ref = doc(db, 'users', uid);
-      await withTimeout(
+      let timedOut = false;
+      await Promise.race([
         setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true }),
-        FIRESTORE_WRITE_TIMEOUT_MS
-      );
+        new Promise((resolve) => setTimeout(() => { timedOut = true; resolve(); }, FIRESTORE_WRITE_TIMEOUT_MS)),
+      ]);
+      return !timedOut;
     } catch (err) {
       console.warn('Firestore upsertUserProfile notice:', err.message);
+      return false;
     }
   }
+  return false;
 }
 
-export async function getUserProfile(uid, { skipLocal = false } = {}) {
+/**
+ * Fetches user profile while distinguishing missing document vs network/timeout error.
+ * Returns { status: 'found' | 'missing' | 'unreachable', profile: object | null }
+ */
+export async function getUserProfileStatus(uid, { skipLocal = false } = {}) {
   const key = getUserProfileKey(uid);
   if (!skipLocal) {
-    // Check user's isolated local profile first (0ms instantaneous!)
     const local = loadLocal(key, null);
     if (local && (local.uid === uid || local.id === uid)) {
-      return local;
+      return { status: 'found', profile: local };
     }
   }
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
-      const snap = await withTimeout(
-        getDoc(doc(db, 'users', uid)),
+      const result = await withTimeout(
+        getDoc(doc(db, 'users', uid)).then((snap) => ({ ok: true, snap })),
         FIRESTORE_READ_TIMEOUT_MS,
-        null
+        { ok: false, snap: null }
       );
-      if (snap && snap.exists && snap.exists()) {
-        const data = { id: snap.id, ...snap.data() };
-        saveLocal(key, data);
-        return data;
+      if (!result || !result.ok || !result.snap) {
+        return { status: 'unreachable', profile: null };
       }
+      if (result.snap.exists && result.snap.exists()) {
+        const data = { id: result.snap.id, ...result.snap.data() };
+        saveLocal(key, data);
+        return { status: 'found', profile: data };
+      }
+      return { status: 'missing', profile: null };
     } catch (err) {
       console.warn('Firestore getUserProfile notice:', err.message);
+      return { status: 'unreachable', profile: null };
     }
   }
 
-  return isDemoUser(uid) ? loadLocal(DEMO_STORAGE_KEY_USER, null) : null;
+  if (isDemoUser(uid)) {
+    const demo = loadLocal(DEMO_STORAGE_KEY_USER, null);
+    return { status: demo ? 'found' : 'missing', profile: demo };
+  }
+  return { status: 'unreachable', profile: null };
+}
+
+export async function getUserProfile(uid, { skipLocal = false } = {}) {
+  const { profile } = await getUserProfileStatus(uid, { skipLocal });
+  return profile;
+}
+
+/**
+ * Fallback lookup for users whose profile was saved under a prior auth method/UID with the same email.
+ */
+export async function findUserProfileByEmail(email) {
+  if (!email || !isFirebaseConfigured || !db) return null;
+  const candidates = Array.from(new Set([email.trim(), email.trim().toLowerCase()].filter(Boolean)));
+  for (const candidate of candidates) {
+    try {
+      const q = query(collection(db, 'users'), where('email', '==', candidate), limit(1));
+      const snap = await withTimeout(getDocs(q), FIRESTORE_READ_TIMEOUT_MS, null);
+      if (snap && snap.docs && snap.docs.length > 0) {
+        const d = snap.docs[0];
+        return { id: d.id, ...d.data() };
+      }
+    } catch {
+      // Firestore rules may disallow querying /users by email; fail gracefully
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks whether the user already has any expenses or budgets stored in Firestore.
+ */
+export async function hasAnyUserActivity(uid) {
+  if (!uid || isDemoUser(uid) || !isFirebaseConfigured || !db) return false;
+  try {
+    const [expSnap, budSnap] = await withTimeout(
+      Promise.all([
+        getDocs(query(collection(db, 'users', uid, 'expenses'), limit(1))),
+        getDocs(query(collection(db, 'users', uid, 'budgets'), limit(1))),
+      ]),
+      FIRESTORE_READ_TIMEOUT_MS,
+      [null, null]
+    );
+    return Boolean((expSnap && !expSnap.empty) || (budSnap && !budSnap.empty));
+  } catch {
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────

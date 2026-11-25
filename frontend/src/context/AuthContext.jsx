@@ -11,7 +11,16 @@ import {
   getAdditionalUserInfo,
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
-import { upsertUserProfile, getUserProfile, getUserProfileKey, loadLocal, saveLocal } from '../lib/firestore';
+import {
+  upsertUserProfile,
+  getUserProfile,
+  getUserProfileStatus,
+  findUserProfileByEmail,
+  hasAnyUserActivity,
+  getUserProfileKey,
+  loadLocal,
+  saveLocal,
+} from '../lib/firestore';
 import { isNativeAndroid } from '../lib/nativeBridge';
 import { nativeGoogleSignIn, initNativeGoogleAuth, nativeGoogleSignOut } from '../lib/googleAuthNative';
 
@@ -87,21 +96,44 @@ export function AuthProvider({ children }) {
 
           // On a fresh device/cleared localStorage, verify Firestore before rejecting session
           if (!isRegistered && (!cachedLocal || !cachedLocal.phoneNumber)) {
-            const remote = await getUserProfile(firebaseUser.uid, { skipLocal: true });
-            if (!remote) {
-              await signOut(auth).catch(() => {});
-              setUser(null);
-              setProfile(null);
-              setLoading(false);
-              return;
+            const remoteResult = await getUserProfileStatus(firebaseUser.uid, { skipLocal: true });
+            if (remoteResult.profile) {
+              resolvedLocal = remoteResult.profile;
+            } else if (remoteResult.status === 'missing') {
+              const [byEmail, hasActivity] = await Promise.all([
+                findUserProfileByEmail(firebaseUser.email),
+                hasAnyUserActivity(firebaseUser.uid),
+              ]);
+              if (byEmail || hasActivity) {
+                resolvedLocal = {
+                  name: firebaseUser.displayName || 'User',
+                  email: firebaseUser.email,
+                  photoURL: firebaseUser.photoURL || '',
+                  currency: '₹',
+                  monthlyIncome: 0,
+                  ...(byEmail || {}),
+                };
+                upsertUserProfile(firebaseUser.uid, resolvedLocal).catch(() => {});
+              } else {
+                await signOut(auth).catch(() => {});
+                if (isNativeAndroid()) {
+                  await nativeGoogleSignOut();
+                }
+                setUser(null);
+                setProfile(null);
+                setLoading(false);
+                return;
+              }
             }
-            resolvedLocal = remote;
-            markAccountRegistered({
-              email: firebaseUser.email,
-              uid: firebaseUser.uid,
-              phoneNumber: remote.phoneNumber || '',
-              name: remote.name || firebaseUser.displayName || 'User',
-            });
+            // If status === 'unreachable' (offline/timeout), keep the valid Firebase session active
+            if (resolvedLocal) {
+              markAccountRegistered({
+                email: firebaseUser.email,
+                uid: firebaseUser.uid,
+                phoneNumber: resolvedLocal.phoneNumber || '',
+                name: resolvedLocal.name || firebaseUser.displayName || 'User',
+              });
+            }
           }
 
           // 1. Immediately set user and instant profile (0ms!)
@@ -194,7 +226,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     if (isFirebaseConfigured && auth) {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      const instantProfile = loadLocal(DEMO_STORAGE_KEY_USER, {
+      const instantProfile = loadLocal(getUserProfileKey(cred.user.uid), {
         name: cred.user.displayName || email.split('@')[0],
         email: cred.user.email,
         currency: '₹',
@@ -251,32 +283,44 @@ export function AuthProvider({ children }) {
 
       // Always fetch Firestore profile on a new device / missing phone cache
       if (!existingProfile || !existingProfile.phoneNumber) {
-        const remote = await getUserProfile(cred.user.uid, { skipLocal: true });
-        if (remote) {
-          existingProfile = remote;
+        const remoteResult = await getUserProfileStatus(cred.user.uid, { skipLocal: true });
+        if (remoteResult.profile) {
+          existingProfile = remoteResult.profile;
+        } else if (!existingProfile) {
+          const byEmail = await findUserProfileByEmail(cred.user.email);
+          if (byEmail) {
+            existingProfile = byEmail;
+          }
         }
       }
 
-      // Only reject if Firebase Auth itself says this Google account is brand new
-      // and no MoneyMap profile exists locally or in Firestore.
+      // Only reject if Firebase Auth says this Google account is brand new
+      // and no MoneyMap profile or user activity exists locally or in Firestore.
       if (additionalInfo?.isNewUser && !isRegisteredLocal && !existingProfile) {
-        await cred.user.delete().catch(() => signOut(auth));
-        setUser(null);
-        setProfile(null);
-        const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
-        err.code = 'NO_ACCOUNT_FOUND';
-        err.email = cred.user.email;
-        throw err;
+        const hasActivity = await hasAnyUserActivity(cred.user.uid);
+        if (!hasActivity) {
+          await cred.user.delete().catch(() => signOut(auth));
+          if (isNativeAndroid()) {
+            await nativeGoogleSignOut();
+          }
+          setUser(null);
+          setProfile(null);
+          const err = new Error('No MoneyMap account found with this Google account. Please create an account first!');
+          err.code = 'NO_ACCOUNT_FOUND';
+          err.email = cred.user.email;
+          throw err;
+        }
       }
 
       const resolvedPhone = phoneNumber || existingProfile?.phoneNumber || '';
+      const { id: _ignoredId, ...cleanExisting } = existingProfile || {};
       const profileData = {
         name: cred.user.displayName || 'User',
-        email: cred.user.email,
         photoURL: cred.user.photoURL || '',
         currency: '₹',
         monthlyIncome: 0,
-        ...(existingProfile || {}),
+        ...cleanExisting,
+        email: cred.user.email,
         phoneNumber: resolvedPhone,
       };
 
@@ -291,9 +335,16 @@ export function AuthProvider({ children }) {
       setUser(cred.user);
       setProfile(profileData);
 
-      // Persist/repair Firestore profile so future cross-device logins always find it
-      if (!existingProfile || (phoneNumber && phoneNumber !== existingProfile.phoneNumber)) {
-        upsertUserProfile(cred.user.uid, profileData).catch(() => {});
+      // Persist/repair Firestore profile (bounded wait so cross-device logins always find it without stalling UI)
+      if (
+        !existingProfile ||
+        existingProfile.id !== cred.user.uid ||
+        (phoneNumber && phoneNumber !== existingProfile.phoneNumber)
+      ) {
+        await Promise.race([
+          upsertUserProfile(cred.user.uid, profileData),
+          new Promise((resolve) => setTimeout(resolve, 2500)),
+        ]).catch(() => {});
       }
 
       return { user: cred.user, profile: profileData };
@@ -328,14 +379,18 @@ export function AuthProvider({ children }) {
         cred = await signInWithPopup(auth, googleProvider);
       }
 
-      const existingRemote = await getUserProfile(cred.user.uid, { skipLocal: true }).catch(() => null);
+      let existingRemote = await getUserProfile(cred.user.uid, { skipLocal: true }).catch(() => null);
+      if (!existingRemote) {
+        existingRemote = await findUserProfileByEmail(cred.user.email).catch(() => null);
+      }
+      const { id: _ignoredRemoteId, ...cleanRemote } = existingRemote || {};
       const profileData = {
         name: cred.user.displayName || 'User',
-        email: cred.user.email,
         currency: '₹',
         monthlyIncome: 0,
         photoURL: cred.user.photoURL || '',
-        ...(existingRemote || {}),
+        ...cleanRemote,
+        email: cred.user.email,
         phoneNumber: phoneNumber || existingRemote?.phoneNumber || '',
         createdAt: existingRemote?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -354,8 +409,11 @@ export function AuthProvider({ children }) {
       setUser(cred.user);
       setProfile(profileData);
 
-      // 3. Save to Firestore reliably so other devices (mobile/laptop) see this account
-      await upsertUserProfile(cred.user.uid, profileData).catch(() => {});
+      // 3. Save to Firestore reliably (bounded wait) so other devices (mobile/laptop) see this account
+      await Promise.race([
+        upsertUserProfile(cred.user.uid, profileData),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]).catch(() => {});
 
       return { user: cred.user, profile: profileData, isNew: !existingRemote };
     } finally {

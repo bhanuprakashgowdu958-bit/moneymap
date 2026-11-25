@@ -1,7 +1,7 @@
 // Firebase configuration and initialization
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
 
 const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyC33XfyhiwYLeSEE5ERPhmBhtTxm_scSkg';
 
@@ -29,7 +29,12 @@ try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   googleProvider = new GoogleAuthProvider();
-  db = getFirestore(app);
+  try {
+    // Auto-detect long polling prevents WebChannel stalls on Capacitor Android WebView and mobile networks
+    db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch {
+    db = getFirestore(app);
+  }
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }

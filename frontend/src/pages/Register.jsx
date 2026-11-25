@@ -1,10 +1,12 @@
 import { useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Register() {
-  const [googlePhone, setGooglePhone] = useState('');
+  const location = useLocation();
+  const initialPhone = (location.state?.phone || '').replace(/\D/g, '').slice(0, 10);
+  const [googlePhone, setGooglePhone] = useState(initialPhone);
   const [phoneError, setPhoneError]   = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
   const phoneInputRef = useRef(null);
@@ -44,8 +46,12 @@ export default function Register() {
         toast.error('⚠️ Domain not authorized in Firebase! Please add moneymap-pl9w.vercel.app in Firebase Console -> Authentication -> Settings -> Authorized domains.', {
           duration: 8000,
         });
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        toast('Google sign-up popup closed', { icon: 'ℹ️' });
+      } else if (
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'USER_CANCELLED' ||
+        err.message?.toLowerCase().includes('cancel')
+      ) {
+        toast('Google sign-up cancelled', { icon: 'ℹ️' });
       } else {
         toast.error(err.message || 'Google sign-up failed');
       }

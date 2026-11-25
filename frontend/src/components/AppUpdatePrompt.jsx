@@ -42,8 +42,8 @@ export default function AppUpdatePrompt() {
       }
     };
 
-    // Initial check shortly after launch
-    const timer = setTimeout(runCheck, 1200);
+    // Initial check immediately on launch so critical fixes arrive before login
+    runCheck();
 
     // Re-check when returning to app from background
     const handleVisibility = () => {
@@ -65,7 +65,6 @@ export default function AppUpdatePrompt() {
     window.addEventListener(OTA_READY_EVENT, handleManualTrigger);
 
     return () => {
-      clearTimeout(timer);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener(OTA_READY_EVENT, handleManualTrigger);
     };
