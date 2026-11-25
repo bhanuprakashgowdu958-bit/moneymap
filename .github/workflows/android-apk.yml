@@ -56,12 +56,51 @@ jobs:
           sed -i 's/\r$//' gradlew
           chmod +x gradlew
 
-      - name: Build Debug APK
+      - name: Restore Cached Signing Keystore
+        uses: actions/cache@v4
+        with:
+          path: frontend/android/app/moneymap-release.keystore
+          key: moneymap-release-keystore-v1
+
+      - name: Generate or Restore Signing Keystore
         working-directory: frontend/android
-        run: ./gradlew assembleDebug
+        run: |
+          KEYSTORE_PATH="app/moneymap-release.keystore"
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
+            echo "✅ Restored keystore from secret"
+          elif [ -f "$KEYSTORE_PATH" ]; then
+            echo "✅ Restored keystore from GitHub Actions cache"
+          else
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -alias moneymap \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass moneymap123 -keypass moneymap123 \
+              -dname "CN=MoneyMap, OU=Dev, O=MoneyMap, L=Bangalore, ST=Karnataka, C=IN"
+            echo "✅ Generated new release-signing keystore"
+          fi
+
+          echo "📋 SHA-1 Fingerprint (add this to Firebase):"
+          keytool -list -v -keystore "$KEYSTORE_PATH" \
+            -alias moneymap -storepass moneymap123 2>/dev/null | grep SHA1
+
+      - name: Build Release APK
+        working-directory: frontend/android
+        run: ./gradlew assembleRelease
+        env:
+          MONEYMAP_KEYSTORE: moneymap-release.keystore
+          MONEYMAP_STORE_PASSWORD: moneymap123
+          MONEYMAP_KEY_ALIAS: moneymap
+          MONEYMAP_KEY_PASSWORD: moneymap123
 
       - name: Rename APK
-        run: cp frontend/android/app/build/outputs/apk/debug/app-debug.apk MoneyMap.apk
+        run: |
+          APK=$(find frontend/android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find frontend/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
+          fi
+          cp "$APK" MoneyMap.apk
 
       - name: Upload MoneyMap.apk Artifact
         uses: actions/upload-artifact@v4

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { isNativeAndroid } from '../lib/nativeBridge';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -10,7 +9,6 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const { login, signInWithGoogleLogin, loginDemo, isFirebaseConfigured } = useAuth();
   const navigate = useNavigate();
-  const onAndroidApp = isNativeAndroid();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -98,9 +96,7 @@ export default function Login() {
             <span>⚡</span> Instant 1-Click Demo Explore
           </button>
 
-          {!onAndroidApp && (
-            <>
-              {/* Google Sign In (One-Click for Existing Users) */}
+          {/* Google Sign In (One-Click for Existing Users — works on web + Android) */}
               <button
                 type="button"
                 onClick={handleGoogle}
@@ -132,8 +128,6 @@ export default function Login() {
                 <span className="text-xs text-gray-400 font-medium">or email</span>
                 <div className="flex-1 h-px bg-gray-100"></div>
               </div>
-            </>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

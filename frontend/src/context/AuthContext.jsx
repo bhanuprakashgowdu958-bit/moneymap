@@ -6,10 +6,14 @@ import {
   onAuthStateChanged,
   updateProfile,
   signInWithPopup,
+  signInWithCredential,
+  GoogleAuthProvider,
   getAdditionalUserInfo,
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
 import { upsertUserProfile, getUserProfile, getUserProfileKey, loadLocal, saveLocal } from '../lib/firestore';
+import { isNativeAndroid } from '../lib/nativeBridge';
+import { nativeGoogleSignIn, initNativeGoogleAuth, nativeGoogleSignOut } from '../lib/googleAuthNative';
 
 const AuthContext = createContext(null);
 
@@ -65,6 +69,11 @@ export function AuthProvider({ children }) {
 
   // Initialize auth state (instant non-blocking)
   useEffect(() => {
+    // Initialize native Google Auth on Android (non-blocking)
+    if (isNativeAndroid()) {
+      initNativeGoogleAuth().catch(() => {});
+    }
+
     if (isFirebaseConfigured && auth) {
       const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         if (firebaseUser) {
@@ -193,15 +202,30 @@ export function AuthProvider({ children }) {
 
   /**
    * Google Sign-In for Existing Users (Login Page)
-   * Super fast: verifies registration in 0ms and navigates instantly
+   * Uses native Credential Manager on Android, popup on web
    */
   const signInWithGoogleLogin = async () => {
-    if (!auth || !googleProvider) {
+    if (!auth) {
       throw new Error('Google Authentication service is not initialized');
     }
 
-    const cred = await signInWithPopup(auth, googleProvider);
-    const additionalInfo = getAdditionalUserInfo(cred);
+    let cred;
+    let additionalInfo;
+
+    if (isNativeAndroid()) {
+      // Native Android: get ID token from Credential Manager, then sign in with Firebase
+      const nativeResult = await nativeGoogleSignIn();
+      const credential = GoogleAuthProvider.credential(nativeResult.idToken);
+      cred = await signInWithCredential(auth, credential);
+      additionalInfo = getAdditionalUserInfo(cred);
+    } else {
+      // Web: use popup
+      if (!googleProvider) {
+        throw new Error('Google Authentication service is not initialized');
+      }
+      cred = await signInWithPopup(auth, googleProvider);
+      additionalInfo = getAdditionalUserInfo(cred);
+    }
 
     // Instant local check first (0ms)
     const isRegisteredLocal = isAccountRegistered(cred.user.email, cred.user.uid);
@@ -244,14 +268,27 @@ export function AuthProvider({ children }) {
 
   /**
    * Google Sign-Up for New Users (Register Page)
-   * Instant registration: saves phone number and logs in immediately
+   * Uses native Credential Manager on Android, popup on web
    */
   const signUpWithGoogleRegister = async (phoneNumber = '') => {
-    if (!auth || !googleProvider) {
+    if (!auth) {
       throw new Error('Google Authentication service is not initialized');
     }
 
-    const cred = await signInWithPopup(auth, googleProvider);
+    let cred;
+
+    if (isNativeAndroid()) {
+      // Native Android: get ID token from Credential Manager, then sign in with Firebase
+      const nativeResult = await nativeGoogleSignIn();
+      const credential = GoogleAuthProvider.credential(nativeResult.idToken);
+      cred = await signInWithCredential(auth, credential);
+    } else {
+      // Web: use popup
+      if (!googleProvider) {
+        throw new Error('Google Authentication service is not initialized');
+      }
+      cred = await signInWithPopup(auth, googleProvider);
+    }
 
     const profileData = {
       name: cred.user.displayName || 'User',
@@ -303,6 +340,9 @@ export function AuthProvider({ children }) {
 
   /** Logout */
   const logout = async () => {
+    if (isNativeAndroid()) {
+      await nativeGoogleSignOut();
+    }
     if (isFirebaseConfigured && auth) {
       await signOut(auth);
     }

@@ -16,10 +16,30 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    // Release signing config — uses env vars from CI or falls back to debug signing
+    def ksEnv = System.getenv("MONEYMAP_KEYSTORE")
+    def ksFile = ksEnv ? (file(ksEnv).exists() ? file(ksEnv) : rootProject.file(ksEnv)) : null
+    if (ksFile != null && ksFile.exists()) {
+        signingConfigs {
+            release {
+                storeFile ksFile
+                storePassword System.getenv("MONEYMAP_STORE_PASSWORD") ?: "moneymap123"
+                keyAlias System.getenv("MONEYMAP_KEY_ALIAS") ?: "moneymap"
+                keyPassword System.getenv("MONEYMAP_KEY_PASSWORD") ?: "moneymap123"
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (signingConfigs.findByName('release')) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 }
