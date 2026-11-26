@@ -339,6 +339,21 @@ function extractExpenseDetails(text, meta = {}) {
   };
 }
 
+function resolveOccurredAtIso(occurredAt) {
+  if (occurredAt !== undefined && occurredAt !== null && occurredAt !== '') {
+    const parsed = new Date(typeof occurredAt === 'number' || /^\d+$/.test(String(occurredAt))
+      ? Number(occurredAt)
+      : String(occurredAt));
+    const ms = parsed.getTime();
+    const minValidMs = Date.UTC(2020, 0, 1);
+    const maxValidMs = Date.now() + 24 * 60 * 60 * 1000;
+    if (!Number.isNaN(ms) && ms >= minValidMs && ms <= maxValidMs) {
+      return parsed.toISOString();
+    }
+  }
+  return new Date().toISOString();
+}
+
 export function parseTransactionSms(rawText, meta = {}) {
   const text = String(rawText || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
@@ -386,7 +401,7 @@ export function parseTransactionSms(rawText, meta = {}) {
     accountHint,
     category: details.category,
     paymentMethod,
-    dateIso: new Date().toISOString(),
+    dateIso: resolveOccurredAtIso(meta.occurredAt),
   };
 }
 
@@ -411,6 +426,7 @@ export default async function handler(req, res) {
   let notificationTitle = '';
   let notificationText = '';
   let sourcePackage = '';
+  let occurredAt = null;
   if (typeof req.body === 'string') {
     smsText = req.body;
   } else if (req.body && typeof req.body === 'object') {
@@ -418,6 +434,7 @@ export default async function handler(req, res) {
     notificationTitle = req.body.notificationTitle || '';
     notificationText = req.body.notificationText || '';
     sourcePackage = req.body.sourcePackage || '';
+    occurredAt = req.body.occurredAt ?? null;
     if (!smsText && (notificationTitle || notificationText)) {
       smsText = `${notificationTitle} ${notificationText}`.trim();
     }
@@ -432,6 +449,7 @@ export default async function handler(req, res) {
       notificationTitle,
       notificationText,
       sourcePackage,
+      occurredAt,
     });
     if (!parsed) {
       return res.status(422).json({ error: 'Could not extract a valid transaction amount from text.' });

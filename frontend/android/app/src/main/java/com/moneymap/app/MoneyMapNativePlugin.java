@@ -52,6 +52,8 @@ public class MoneyMapNativePlugin extends Plugin {
     public void load() {
         super.load();
         cleanupOldApkCache();
+        MoneyMapExpenseWebhook.registerNetworkCallback(getContext());
+        MoneyMapExpenseWebhook.flushPendingAsync(getContext());
         if (MoneyMapPrefs.isAppGuardEnabled(getContext()) && hasUsageStatsAccess(getContext())) {
             Intent svc = new Intent(getContext(), AppGuardService.class);
             ContextCompat.startForegroundService(getContext(), svc);
@@ -63,6 +65,7 @@ public class MoneyMapNativePlugin extends Plugin {
         String webhookUrl = call.getString("webhookUrl", "");
         String budgetCheckBase = call.getString("budgetCheckBase", "");
         MoneyMapPrefs.setConfig(getContext(), webhookUrl, budgetCheckBase);
+        MoneyMapExpenseWebhook.flushPendingAsync(getContext());
         call.resolve();
     }
 

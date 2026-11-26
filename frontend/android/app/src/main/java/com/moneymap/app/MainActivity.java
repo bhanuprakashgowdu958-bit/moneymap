@@ -22,5 +22,13 @@ public class MainActivity extends BridgeActivity {
             controller.setAppearanceLightStatusBars(true);
             controller.setAppearanceLightNavigationBars(true);
         }
+
+        MoneyMapExpenseWebhook.registerNetworkCallback(this);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        MoneyMapExpenseWebhook.flushPendingAsync(this);
     }
 }

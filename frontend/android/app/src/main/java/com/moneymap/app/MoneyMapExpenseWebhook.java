@@ -1,8 +1,12 @@
 package com.moneymap.app;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -11,22 +15,33 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Shared debit/credit detection, cross-source deduplication, and webhook uploader
- * used by both MoneyMapSmsReceiver (RECEIVE_SMS) and MoneyMapNotificationListener.
+ * Shared debit/credit detection, cross-source deduplication, offline retry queue,
+ * and webhook uploader used by both MoneyMapSmsReceiver and MoneyMapNotificationListener.
  */
 public final class MoneyMapExpenseWebhook {
     private static final String TAG = "MoneyMapWebhook";
     private static final long DEDUPE_WINDOW_MS = 30_000L;
+    private static final long MAX_QUEUE_AGE_MS = 7L * 24L * 60L * 60L * 1000L;
+    private static final int MAX_QUEUE_SIZE = 50;
+
+    private enum SendResult {
+        SUCCESS,
+        DROP_PERMANENT,
+        RETRY_TRANSIENT
+    }
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
         "(?:debited|paid\\s+(?:to|rs|inr|₹)|payment\\s+(?:of\\s+)?(?:rs|inr|₹)|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
@@ -55,6 +70,8 @@ public final class MoneyMapExpenseWebhook {
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
     private static final ConcurrentHashMap<String, Long> RECENT_EVENTS = new ConcurrentHashMap<>();
+    private static final Object QUEUE_LOCK = new Object();
+    private static final AtomicBoolean NETWORK_CALLBACK_REGISTERED = new AtomicBoolean(false);
 
     private MoneyMapExpenseWebhook() {}
 
@@ -68,6 +85,42 @@ public final class MoneyMapExpenseWebhook {
     }
 
     /**
+     * Registers a default network callback so offline-queued SMS/notifications
+     * automatically upload as soon as mobile data or Wi-Fi reconnects.
+     */
+    public static void registerNetworkCallback(Context context) {
+        if (context == null) return;
+        if (!NETWORK_CALLBACK_REGISTERED.compareAndSet(false, true)) return;
+
+        Context appCtx = context.getApplicationContext();
+        try {
+            ConnectivityManager cm = (ConnectivityManager) appCtx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                NETWORK_CALLBACK_REGISTERED.set(false);
+                return;
+            }
+            cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    flushPendingAsync(appCtx);
+                }
+            });
+        } catch (Exception e) {
+            NETWORK_CALLBACK_REGISTERED.set(false);
+            Log.w(TAG, "Network callback registration skipped: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Attempts to flush any queued offline transactions if a network connection is active.
+     */
+    public static void flushPendingAsync(Context context) {
+        if (context == null) return;
+        Context appCtx = context.getApplicationContext();
+        EXECUTOR.execute(() -> flushPendingInternal(appCtx));
+    }
+
+    /**
      * Enqueues a transaction upload if the same direction + amount has not already been
      * processed within DEDUPE_WINDOW_MS (prevents double-logging when both SMS and
      * notification listeners fire for the same transaction).
@@ -78,7 +131,7 @@ public final class MoneyMapExpenseWebhook {
 
     /**
      * Enqueues a notification/SMS upload while preserving separate notification title,
-     * body text, and source package so the webhook can isolate sender/recipient names.
+     * body text, and source package, and persisting to an offline retry queue when offline.
      */
     public static void submitNotificationAsync(
         Context context,
@@ -96,12 +149,6 @@ public final class MoneyMapExpenseWebhook {
             return;
         }
 
-        String webhookUrl = MoneyMapPrefs.getWebhookUrl(context);
-        if (webhookUrl == null || webhookUrl.isEmpty()) {
-            if (onComplete != null) onComplete.run();
-            return;
-        }
-
         String dedupeKey = buildDedupeKey(rawText);
         long now = System.currentTimeMillis();
         pruneExpired(now);
@@ -115,14 +162,168 @@ public final class MoneyMapExpenseWebhook {
             RECENT_EVENTS.put(dedupeKey, now);
         }
 
+        JSONObject payload = buildPayload(rawText, safeTitle, safeBody, sourcePackage, now);
+        if (payload == null) {
+            if (onComplete != null) onComplete.run();
+            return;
+        }
+
         Context appCtx = context.getApplicationContext();
+        registerNetworkCallback(appCtx);
+
         EXECUTOR.execute(() -> {
             try {
-                postToWebhook(appCtx, webhookUrl, rawText, safeTitle, safeBody, sourcePackage);
+                String webhookUrl = MoneyMapPrefs.getWebhookUrl(appCtx);
+                if (webhookUrl == null || webhookUrl.isEmpty() || !isNetworkAvailable(appCtx)) {
+                    enqueuePending(appCtx, payload);
+                    return;
+                }
+
+                // Flush older offline events first to keep chronological order
+                flushPendingInternal(appCtx);
+
+                SendResult result = postPayload(appCtx, webhookUrl, payload);
+                if (result == SendResult.RETRY_TRANSIENT) {
+                    enqueuePending(appCtx, payload);
+                }
             } finally {
                 if (onComplete != null) onComplete.run();
             }
         });
+    }
+
+    private static JSONObject buildPayload(
+        String smsText,
+        String notificationTitle,
+        String notificationText,
+        String sourcePackage,
+        long occurredAtMs
+    ) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("text", smsText);
+            body.put("occurredAt", occurredAtMs);
+            if (notificationTitle != null && !notificationTitle.isEmpty()) {
+                body.put("notificationTitle", notificationTitle);
+            }
+            if (notificationText != null && !notificationText.isEmpty()) {
+                body.put("notificationText", notificationText);
+            }
+            if (sourcePackage != null && !sourcePackage.isEmpty()) {
+                body.put("sourcePackage", sourcePackage);
+            }
+            return body;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isNetworkAvailable(Context context) {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            Network active = cm.getActiveNetwork();
+            if (active == null) return false;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+            return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void enqueuePending(Context context, JSONObject payload) {
+        synchronized (QUEUE_LOCK) {
+            try {
+                List<JSONObject> list = readQueueLocked(context);
+                list.add(payload);
+                while (list.size() > MAX_QUEUE_SIZE) {
+                    list.remove(0);
+                }
+                writeQueueLocked(context, list);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to enqueue offline transaction: " + e.getMessage());
+            }
+        }
+    }
+
+    private static void flushPendingInternal(Context context) {
+        String webhookUrl = MoneyMapPrefs.getWebhookUrl(context);
+        if (webhookUrl == null || webhookUrl.isEmpty() || !isNetworkAvailable(context)) {
+            return;
+        }
+
+        List<JSONObject> snapshot;
+        synchronized (QUEUE_LOCK) {
+            snapshot = readQueueLocked(context);
+        }
+        if (snapshot.isEmpty()) return;
+
+        List<JSONObject> remaining = new ArrayList<>();
+        boolean hitTransientFailure = false;
+
+        for (int i = 0; i < snapshot.size(); i++) {
+            JSONObject item = snapshot.get(i);
+            if (hitTransientFailure) {
+                remaining.add(item);
+                continue;
+            }
+            SendResult result = postPayload(context, webhookUrl, item);
+            if (result == SendResult.RETRY_TRANSIENT) {
+                hitTransientFailure = true;
+                remaining.add(item);
+            }
+            // SUCCESS or DROP_PERMANENT removes item from queue
+        }
+
+        synchronized (QUEUE_LOCK) {
+            // Re-merge in case anything new arrived while flushing
+            List<JSONObject> current = readQueueLocked(context);
+            List<JSONObject> newlyAdded = new ArrayList<>();
+            for (JSONObject item : current) {
+                long ts = item.optLong("occurredAt", 0L);
+                boolean wasInSnapshot = false;
+                for (JSONObject oldItem : snapshot) {
+                    if (oldItem.optLong("occurredAt", -1L) == ts &&
+                        oldItem.optString("text", "").equals(item.optString("text", ""))) {
+                        wasInSnapshot = true;
+                        break;
+                    }
+                }
+                if (!wasInSnapshot) {
+                    newlyAdded.add(item);
+                }
+            }
+            remaining.addAll(newlyAdded);
+            while (remaining.size() > MAX_QUEUE_SIZE) {
+                remaining.remove(0);
+            }
+            writeQueueLocked(context, remaining);
+        }
+    }
+
+    private static List<JSONObject> readQueueLocked(Context context) {
+        List<JSONObject> items = new ArrayList<>();
+        long cutoff = System.currentTimeMillis() - MAX_QUEUE_AGE_MS;
+        try {
+            JSONArray arr = new JSONArray(MoneyMapPrefs.getPendingWebhooksJson(context));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.optJSONObject(i);
+                if (obj == null) continue;
+                long ts = obj.optLong("occurredAt", System.currentTimeMillis());
+                if (ts >= cutoff) {
+                    items.add(obj);
+                }
+            }
+        } catch (Exception ignored) {}
+        return items;
+    }
+
+    private static void writeQueueLocked(Context context, List<JSONObject> items) {
+        JSONArray arr = new JSONArray();
+        for (JSONObject obj : items) {
+            arr.put(obj);
+        }
+        MoneyMapPrefs.setPendingWebhooksJson(context, arr.toString());
     }
 
     private static String buildDedupeKey(String text) {
@@ -146,14 +347,7 @@ public final class MoneyMapExpenseWebhook {
         }
     }
 
-    private static void postToWebhook(
-        Context context,
-        String webhookUrl,
-        String smsText,
-        String notificationTitle,
-        String notificationText,
-        String sourcePackage
-    ) {
+    private static SendResult postPayload(Context context, String webhookUrl, JSONObject body) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(webhookUrl);
@@ -164,19 +358,7 @@ public final class MoneyMapExpenseWebhook {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
-            JSONObject body = new JSONObject();
-            body.put("text", smsText);
-            if (notificationTitle != null && !notificationTitle.isEmpty()) {
-                body.put("notificationTitle", notificationTitle);
-            }
-            if (notificationText != null && !notificationText.isEmpty()) {
-                body.put("notificationText", notificationText);
-            }
-            if (sourcePackage != null && !sourcePackage.isEmpty()) {
-                body.put("sourcePackage", sourcePackage);
-            }
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(bytes);
             }
@@ -192,20 +374,27 @@ public final class MoneyMapExpenseWebhook {
                     }
                 }
                 JSONObject res = new JSONObject(sb.toString());
-                if (res.optBoolean("ignored", false)) return;
-
-                String budgetAlert = res.optString("budgetAlert", "");
-                if (!budgetAlert.isEmpty() && !"null".equalsIgnoreCase(budgetAlert)) {
-                    MoneyMapNotifier.showBudgetAlert(
-                        context,
-                        "MoneyMap Budget Alert",
-                        budgetAlert,
-                        (int) (System.currentTimeMillis() % 100000)
-                    );
+                if (!res.optBoolean("ignored", false)) {
+                    String budgetAlert = res.optString("budgetAlert", "");
+                    if (!budgetAlert.isEmpty() && !"null".equalsIgnoreCase(budgetAlert)) {
+                        MoneyMapNotifier.showBudgetAlert(
+                            context,
+                            "MoneyMap Budget Alert",
+                            budgetAlert,
+                            (int) (System.currentTimeMillis() % 100000)
+                        );
+                    }
                 }
+                return SendResult.SUCCESS;
             }
+
+            if (code == 429 || code >= 500) {
+                return SendResult.RETRY_TRANSIENT;
+            }
+            return SendResult.DROP_PERMANENT;
         } catch (Exception e) {
-            Log.w(TAG, "Webhook sync failed: " + e.getMessage());
+            Log.w(TAG, "Webhook sync failed (queued for retry): " + e.getMessage());
+            return SendResult.RETRY_TRANSIENT;
         } finally {
             if (conn != null) conn.disconnect();
         }

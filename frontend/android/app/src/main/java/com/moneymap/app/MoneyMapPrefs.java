@@ -11,6 +11,7 @@ public final class MoneyMapPrefs {
     private static final String KEY_SMS_AUTO_TRACK = "sms_auto_track_enabled";
     private static final String KEY_APP_GUARD = "app_guard_enabled";
     private static final String KEY_LAST_GUARD_ALERTS = "last_guard_alerts";
+    private static final String KEY_PENDING_WEBHOOKS = "pending_webhook_queue";
 
     private MoneyMapPrefs() {}
 
@@ -63,5 +64,13 @@ public final class MoneyMapPrefs {
 
     public static void setLastGuardAlertTime(Context context, String pkg, long ts) {
         prefs(context).edit().putLong(KEY_LAST_GUARD_ALERTS + "_" + pkg, ts).apply();
+    }
+
+    public static String getPendingWebhooksJson(Context context) {
+        return prefs(context).getString(KEY_PENDING_WEBHOOKS, "[]");
+    }
+
+    public static void setPendingWebhooksJson(Context context, String jsonArray) {
+        prefs(context).edit().putString(KEY_PENDING_WEBHOOKS, jsonArray == null ? "[]" : jsonArray).commit();
     }
 }
