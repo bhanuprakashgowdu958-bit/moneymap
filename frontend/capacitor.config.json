@@ -20,6 +20,7 @@
     },
     "CapacitorUpdater": {
       "autoUpdate": "off",
+      "resetWhenUpdate": true,
       "statsUrl": "",
       "appReadyTimeout": 15000,
       "autoDeleteFailed": true,

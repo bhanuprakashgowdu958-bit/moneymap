@@ -144,7 +144,6 @@ export default function AppUpdatePrompt() {
                   setUpdateInfo((prev) =>
                     prev && prev.remote?.version === remoteVer ? { ...prev, bundle } : prev
                   );
-                  return stageOtaForNextRestart(bundle.id);
                 }
               })
               .catch(() => {});
@@ -212,6 +211,9 @@ export default function AppUpdatePrompt() {
 
   const handleDismiss = () => {
     awaitingInstallPermRef.current = false;
+    if (updateInfo?.status === 'ready' && updateInfo.bundle?.id) {
+      stageOtaForNextRestart(updateInfo.bundle.id);
+    }
     saveSnooze(remoteVersion);
     setDismissedVersion(remoteVersion);
     setUpdateInfo(null);
