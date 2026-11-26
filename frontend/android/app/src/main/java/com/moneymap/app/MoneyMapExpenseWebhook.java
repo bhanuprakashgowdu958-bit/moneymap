@@ -19,8 +19,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -28,12 +26,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Shared debit/credit detection, cross-source deduplication, offline retry queue,
+ * Shared debit/credit detection, persisted cross-source deduplication, offline retry queue,
  * and webhook uploader used by both MoneyMapSmsReceiver and MoneyMapNotificationListener.
  */
 public final class MoneyMapExpenseWebhook {
     private static final String TAG = "MoneyMapWebhook";
-    private static final long DEDUPE_WINDOW_MS = 30_000L;
+    private static final long DEDUPE_WINDOW_MS = 90_000L;
     private static final long MAX_QUEUE_AGE_MS = 7L * 24L * 60L * 60L * 1000L;
     private static final int MAX_QUEUE_SIZE = 50;
 
@@ -44,12 +42,12 @@ public final class MoneyMapExpenseWebhook {
     }
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|paid\\s+(?:to|rs|inr|₹)|payment\\s+(?:of\\s+)?(?:rs|inr|₹)|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
+        "(?:debited|debit\\s+(?:of|from|in)|paid\\s+(?:to|for|at|by|via|rs|inr|₹|[0-9])|payment\\s+(?:of\\s+)?(?:rs|inr|₹|[0-9])|sent\\s+(?:to|rs|inr|₹|[0-9])|transferred(?:\\s+(?:to|from))?|trf\\s+to|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s*(?:from|by|to|rs|inr|₹)|[0-9]\\s*dr\\.?\\b|you\\s+(?:have\\s+)?(?:paid|sent|transferred))",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern CREDIT_SIGNAL = Pattern.compile(
-        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s+(?:to|by))",
+        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s*(?:to|by|in)|[0-9]\\s*cr\\.?\\b)",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -63,25 +61,36 @@ public final class MoneyMapExpenseWebhook {
         Pattern.CASE_INSENSITIVE
     );
 
-    private static final Pattern AMOUNT_SIGNAL = Pattern.compile(
-        "(?:rs\\.?|inr|₹)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+    // Supports: "Rs.35", "Rs:35.00", "INR 35", "₹35", "debited by 35.0", "paid 35", "35.00 Rs"
+    private static final Pattern AMOUNT_SIGNAL_CURRENCY_PREFIX = Pattern.compile(
+        "(?:rs\\.?|inr|₹)\\s*[:\\-]?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern AMOUNT_SIGNAL_AFTER_VERB = Pattern.compile(
+        "\\b(?:debited|credited|paid|sent|spent|withdrawn|deducted|charged|transferred|received|deposited|recharged?)(?:\\s+(?:by|for|of|with|amount|amt))?\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern AMOUNT_SIGNAL_CURRENCY_SUFFIX = Pattern.compile(
+        "\\b([0-9,]+(?:\\.[0-9]{1,2})?)\\s*(?:rs\\.?|rupees|inr)\\b",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
-    private static final ConcurrentHashMap<String, Long> RECENT_EVENTS = new ConcurrentHashMap<>();
+    private static final Object DEDUPE_LOCK = new Object();
     private static final Object QUEUE_LOCK = new Object();
     private static final AtomicBoolean NETWORK_CALLBACK_REGISTERED = new AtomicBoolean(false);
 
     private MoneyMapExpenseWebhook() {}
 
     public static boolean looksLikeDebitExpense(String text) {
-        if (text == null || text.trim().length() < 8) return false;
+        if (text == null || text.trim().length() < 6) return false;
         if (IGNORE_SIGNAL.matcher(text).find()) return false;
         boolean hasSignal = DEBIT_SIGNAL.matcher(text).find()
             || CREDIT_SIGNAL.matcher(text).find()
             || GENERIC_BANK_SIGNAL.matcher(text).find();
-        return hasSignal && AMOUNT_SIGNAL.matcher(text).find();
+        return hasSignal && extractAmountString(text) != null;
     }
 
     /**
@@ -149,17 +158,12 @@ public final class MoneyMapExpenseWebhook {
             return;
         }
 
-        String dedupeKey = buildDedupeKey(rawText);
+        Context appCtx = context.getApplicationContext();
         long now = System.currentTimeMillis();
-        pruneExpired(now);
-
-        Long previous = RECENT_EVENTS.putIfAbsent(dedupeKey, now);
-        if (previous != null && (now - previous) < DEDUPE_WINDOW_MS) {
+        String dedupeKey = buildDedupeKey(rawText);
+        if (isDuplicateAndRecord(appCtx, dedupeKey, now)) {
             if (onComplete != null) onComplete.run();
             return;
-        }
-        if (previous != null) {
-            RECENT_EVENTS.put(dedupeKey, now);
         }
 
         JSONObject payload = buildPayload(rawText, safeTitle, safeBody, sourcePackage, now);
@@ -168,7 +172,6 @@ public final class MoneyMapExpenseWebhook {
             return;
         }
 
-        Context appCtx = context.getApplicationContext();
         registerNetworkCallback(appCtx);
 
         EXECUTOR.execute(() -> {
@@ -179,7 +182,6 @@ public final class MoneyMapExpenseWebhook {
                     return;
                 }
 
-                // Flush older offline events first to keep chronological order
                 flushPendingInternal(appCtx);
 
                 SendResult result = postPayload(appCtx, webhookUrl, payload);
@@ -190,6 +192,56 @@ public final class MoneyMapExpenseWebhook {
                 if (onComplete != null) onComplete.run();
             }
         });
+    }
+
+    private static String extractAmountString(String text) {
+        Pattern[] patterns = {
+            AMOUNT_SIGNAL_CURRENCY_PREFIX,
+            AMOUNT_SIGNAL_AFTER_VERB,
+            AMOUNT_SIGNAL_CURRENCY_SUFFIX
+        };
+        for (Pattern p : patterns) {
+            Matcher m = p.matcher(text);
+            if (m.find() && m.group(1) != null) {
+                try {
+                    String raw = m.group(1).replace(",", "");
+                    double val = Double.parseDouble(raw);
+                    if (val > 0) {
+                        return raw.replaceAll("\\.0+$", "");
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return null;
+    }
+
+    private static boolean isDuplicateAndRecord(Context context, String dedupeKey, long now) {
+        synchronized (DEDUPE_LOCK) {
+            try {
+                JSONObject map = new JSONObject(MoneyMapPrefs.getRecentDedupeJson(context));
+                JSONObject pruned = new JSONObject();
+                Iterator<String> keys = map.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    long ts = map.optLong(k, 0L);
+                    if ((now - ts) < DEDUPE_WINDOW_MS * 2) {
+                        pruned.put(k, ts);
+                    }
+                }
+
+                long previous = pruned.optLong(dedupeKey, 0L);
+                if (previous > 0L && (now - previous) < DEDUPE_WINDOW_MS) {
+                    MoneyMapPrefs.setRecentDedupeJson(context, pruned.toString());
+                    return true;
+                }
+
+                pruned.put(dedupeKey, now);
+                MoneyMapPrefs.setRecentDedupeJson(context, pruned.toString());
+                return false;
+            } catch (Exception e) {
+                return false;
+            }
+        }
     }
 
     private static JSONObject buildPayload(
@@ -272,11 +324,9 @@ public final class MoneyMapExpenseWebhook {
                 hitTransientFailure = true;
                 remaining.add(item);
             }
-            // SUCCESS or DROP_PERMANENT removes item from queue
         }
 
         synchronized (QUEUE_LOCK) {
-            // Re-merge in case anything new arrived while flushing
             List<JSONObject> current = readQueueLocked(context);
             List<JSONObject> newlyAdded = new ArrayList<>();
             for (JSONObject item : current) {
@@ -327,24 +377,14 @@ public final class MoneyMapExpenseWebhook {
     }
 
     private static String buildDedupeKey(String text) {
-        String dir = CREDIT_SIGNAL.matcher(text).find() ? "cr:" : "dr:";
-        Matcher m = AMOUNT_SIGNAL.matcher(text);
-        if (m.find() && m.group(1) != null) {
-            String normalizedAmt = m.group(1).replace(",", "").replaceAll("\\.00$", "");
-            return dir + "amt:" + normalizedAmt;
+        boolean hasCredit = CREDIT_SIGNAL.matcher(text).find();
+        boolean hasExplicitDebit = DEBIT_SIGNAL.matcher(text).find();
+        String dir = (hasCredit && !hasExplicitDebit) ? "cr:" : "dr:";
+        String amt = extractAmountString(text);
+        if (amt != null) {
+            return dir + "amt:" + amt;
         }
         return dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static void pruneExpired(long now) {
-        if (RECENT_EVENTS.size() < 32) return;
-        Iterator<Map.Entry<String, Long>> it = RECENT_EVENTS.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, Long> entry = it.next();
-            if ((now - entry.getValue()) > DEDUPE_WINDOW_MS * 2) {
-                it.remove();
-            }
-        }
     }
 
     private static SendResult postPayload(Context context, String webhookUrl, JSONObject body) {

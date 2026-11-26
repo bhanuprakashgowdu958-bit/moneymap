@@ -78,13 +78,13 @@ const NOISE_REASON_PATTERNS = [
 ];
 
 const STRONG_DEBIT_RE =
-  /\b(?:debited|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+(?:\s+to\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
+  /\b(?:debited|debit\s+(?:of|from|in)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+to\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
-  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
+  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
 
 const GENERIC_TXN_VERB_RE =
-  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|charged|recharged?|bill\s+payment|purchase|refund|cashback|salary)\b/i;
+  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|trf|deducted|charged|recharged?|bill\s+payment|purchase|refund|cashback|salary)\b/i;
 
 function formatPartyName(str) {
   return str
@@ -267,12 +267,15 @@ function classifyTransaction(text) {
   const hasIncomeSignal = STRONG_INCOME_RE.test(text);
   const hasDebitSignal = STRONG_DEBIT_RE.test(text);
 
-  // If explicit credit signal is present without "your account debited", it's income.
-  if (hasIncomeSignal && !/\b(?:your\s+(?:a\/c|acct|account|card)\s+.*debited|debited\s+(?:from|by)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|[0-9,.]+))\b/i.test(text)) {
+  // If explicit credit signal is present without account debit, it's income.
+  if (
+    hasIncomeSignal &&
+    !/\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+))\b/i.test(text)
+  ) {
     return { action: 'income' };
   }
 
-  if (hasDebitSignal || /\b(?:debited|spent|paid|sent)\b/i.test(text)) {
+  if (hasDebitSignal || /\b(?:debited|spent|paid|sent|transferred|trf|charged|withdrawn)\b/i.test(text)) {
     return { action: 'expense' };
   }
 
@@ -366,9 +369,9 @@ export function parseTransactionSms(rawText, meta = {}) {
   // Extract amount
   let amount = null;
   const amountPatterns = [
-    /(?:rs\.?|inr|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-    /(?:debited(?:\s+by|\s+with)?|credited(?:\s+by|\s+with)?|received|deposited|spent|paid|sent)\s*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-    /([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:rs|rupees|inr)/i,
+    /(?:rs\.?|inr|₹)\s*[:\-]?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+    /\b(?:debited|credited|paid|sent|spent|withdrawn|deducted|charged|transferred|received|deposited|recharged?)(?:\s+(?:by|for|of|with|amount|amt))?\s*[:\-]?\s*(?:rs\.?|inr|₹)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+    /\b([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:rs\.?|rupees|inr)\b/i,
   ];
   for (const regex of amountPatterns) {
     const m = text.match(regex);

@@ -45,7 +45,21 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
             text = charSeqToString(extras.getCharSequence(Notification.EXTRA_TEXT));
         }
         String combined = (title + " " + text).trim();
-        if (combined.length() < 8) return;
+        if (!MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) {
+            CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+            if (lines != null && lines.length > 0) {
+                for (int i = lines.length - 1; i >= 0; i--) {
+                    String line = charSeqToString(lines[i]);
+                    if (MoneyMapExpenseWebhook.looksLikeDebitExpense(line)) {
+                        title = "";
+                        text = line;
+                        combined = line;
+                        break;
+                    }
+                }
+            }
+        }
+        if (combined.length() < 6) return;
 
         boolean isKnownApp = PAYMENT_PACKAGES.contains(pkg.toLowerCase(Locale.ROOT));
         if (!isKnownApp && !MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) return;

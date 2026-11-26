@@ -12,6 +12,7 @@ public final class MoneyMapPrefs {
     private static final String KEY_APP_GUARD = "app_guard_enabled";
     private static final String KEY_LAST_GUARD_ALERTS = "last_guard_alerts";
     private static final String KEY_PENDING_WEBHOOKS = "pending_webhook_queue";
+    private static final String KEY_RECENT_DEDUPE = "recent_dedupe_events";
 
     private MoneyMapPrefs() {}
 
@@ -72,5 +73,13 @@ public final class MoneyMapPrefs {
 
     public static void setPendingWebhooksJson(Context context, String jsonArray) {
         prefs(context).edit().putString(KEY_PENDING_WEBHOOKS, jsonArray == null ? "[]" : jsonArray).commit();
+    }
+
+    public static String getRecentDedupeJson(Context context) {
+        return prefs(context).getString(KEY_RECENT_DEDUPE, "{}");
+    }
+
+    public static void setRecentDedupeJson(Context context, String jsonObject) {
+        prefs(context).edit().putString(KEY_RECENT_DEDUPE, jsonObject == null ? "{}" : jsonObject).apply();
     }
 }
