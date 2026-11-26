@@ -11,34 +11,16 @@ import {
 } from '../lib/otaUpdater';
 
 const RESUME_CHECK_COOLDOWN_MS = 60 * 1000; // 1 minute cooldown when switching apps
-const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours after tapping "Later"
 const LAST_CHECK_KEY = 'moneymap_ota_last_check';
-const DISMISSED_KEY = 'moneymap_ota_dismissed';
+const LEGACY_DISMISSED_KEY = 'moneymap_ota_dismissed';
 const DEFAULT_APK_URL =
   'https://github.com/bhanuprakashgowdu958-bit/moneymap/releases/latest/download/MoneyMap.apk';
 
-function isSnoozed(version) {
-  if (!version) return false;
+function clearLegacySnooze() {
   try {
-    const raw = localStorage.getItem(DISMISSED_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    if (parsed?.version !== version) return false;
-    return Date.now() - Number(parsed.dismissedAt || 0) < SNOOZE_DURATION_MS;
+    localStorage.removeItem(LEGACY_DISMISSED_KEY);
   } catch {
-    return false;
-  }
-}
-
-function saveSnooze(version) {
-  if (!version) return;
-  try {
-    localStorage.setItem(
-      DISMISSED_KEY,
-      JSON.stringify({ version, dismissedAt: Date.now() })
-    );
-  } catch {
-    // Ignore storage quota errors
+    // Ignore storage errors
   }
 }
 
@@ -69,7 +51,6 @@ export default function AppUpdatePrompt() {
   const startApkInstall = useCallback(async (info) => {
     if (!info) return;
     const apkUrl = info.remote?.apkUrl || DEFAULT_APK_URL;
-    const remoteVer = info.remote?.version || '';
     setApplying(true);
     setDownloadProgress(0);
     try {
@@ -87,7 +68,6 @@ export default function AppUpdatePrompt() {
         return;
       }
       if (res?.started) {
-        saveSnooze(remoteVer);
         setApplying(false);
         setDownloadProgress(null);
       }
@@ -96,7 +76,6 @@ export default function AppUpdatePrompt() {
       setDownloadProgress(null);
       const msg = err?.message || '';
       if (msg.toLowerCase().includes('not implemented') || msg.toLowerCase().includes('unimplemented')) {
-        saveSnooze(remoteVer);
         window.open(apkUrl, '_blank', 'noopener,noreferrer');
         return;
       }
@@ -115,8 +94,14 @@ export default function AppUpdatePrompt() {
 
     // 1. Confirm current bundle booted cleanly BEFORE any network requests
     notifyOtaAppReady();
+    clearLegacySnooze();
 
-    const runUpdateCheck = async (forceImmediate = false) => {
+    let cancelled = false;
+    let retryTimer = null;
+    let retryAttempt = 0;
+    const RETRY_DELAYS_MS = [3000, 8000];
+
+    const runUpdateCheck = async (forceImmediate = false, clearDismissed = false) => {
       const now = Date.now();
       const lastCheck = readLastCheckTime();
       if (checkingRef.current) return;
@@ -125,22 +110,30 @@ export default function AppUpdatePrompt() {
       checkingRef.current = true;
       try {
         const result = await checkOtaAvailability();
+        if (cancelled) return;
+        retryAttempt = 0;
         saveLastCheckTime(now);
 
         if (result.status === 'ready' || result.status === 'native_required') {
           const remoteVer = result.remote?.version || '';
           const isForced = Boolean(result.remote?.forceUpdate);
 
-          // Show the update prompt IMMEDIATELY without waiting for the zip download
-          if (isForced || !isSnoozed(remoteVer)) {
-            setUpdateInfo(result);
+          if (clearDismissed || isForced) {
+            setDismissedVersion('');
           }
+
+          // Show the update prompt IMMEDIATELY when opening the app
+          setUpdateInfo((prev) =>
+            prev?.remote?.version === remoteVer && prev?.bundle
+              ? { ...result, bundle: prev.bundle }
+              : result
+          );
 
           // Pre-download OTA zip quietly in the background so "Update Now" is instant
           if (result.status === 'ready' && result.remote) {
             downloadOtaBundle(result.remote)
               .then((bundle) => {
-                if (bundle?.id) {
+                if (!cancelled && bundle?.id) {
                   setUpdateInfo((prev) =>
                     prev && prev.remote?.version === remoteVer ? { ...prev, bundle } : prev
                   );
@@ -150,20 +143,23 @@ export default function AppUpdatePrompt() {
           }
         }
       } catch {
-        // Silent fail for automatic checks (offline/poor network)
+        // Retry briefly if device just unlocked or network is still connecting
+        if (!cancelled && retryAttempt < RETRY_DELAYS_MS.length) {
+          const delay = RETRY_DELAYS_MS[retryAttempt++];
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => {
+            if (!cancelled) runUpdateCheck(true, clearDismissed);
+          }, delay);
+        }
       } finally {
         checkingRef.current = false;
       }
     };
 
     // Always check immediately when the user opens the app
-    runUpdateCheck(true);
+    runUpdateCheck(true, true);
 
-    // Auto-resume APK install if returning from "Allow unknown apps" settings,
-    // otherwise check again if returning after RESUME_CHECK_COOLDOWN_MS.
-    const handleVisibility = async () => {
-      if (document.visibilityState !== 'visible') return;
-
+    const handleResumeCheck = async () => {
       if (awaitingInstallPermRef.current && updateInfoRef.current) {
         try {
           const st = await getNativeStatus();
@@ -177,7 +173,22 @@ export default function AppUpdatePrompt() {
         }
       }
 
-      runUpdateCheck(false);
+      const elapsed = Date.now() - readLastCheckTime();
+      runUpdateCheck(false, elapsed >= RESUME_CHECK_COOLDOWN_MS);
+    };
+
+    // Auto-resume APK install if returning from "Allow unknown apps" settings,
+    // otherwise check again on reopen after RESUME_CHECK_COOLDOWN_MS.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleResumeCheck();
+      }
+    };
+
+    const handleOnline = () => {
+      if (!updateInfoRef.current) {
+        runUpdateCheck(true, true);
+      }
     };
 
     // Allow manual "Check for Updates" from Settings to show the prompt immediately
@@ -191,10 +202,16 @@ export default function AppUpdatePrompt() {
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
+    document.addEventListener('resume', handleResumeCheck);
+    window.addEventListener('online', handleOnline);
     window.addEventListener(OTA_READY_EVENT, handleManualTrigger);
 
     return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
+      document.removeEventListener('resume', handleResumeCheck);
+      window.removeEventListener('online', handleOnline);
       window.removeEventListener(OTA_READY_EVENT, handleManualTrigger);
     };
   }, [startApkInstall]);
@@ -214,7 +231,6 @@ export default function AppUpdatePrompt() {
     if (updateInfo?.status === 'ready' && updateInfo.bundle?.id) {
       stageOtaForNextRestart(updateInfo.bundle.id);
     }
-    saveSnooze(remoteVersion);
     setDismissedVersion(remoteVersion);
     setUpdateInfo(null);
   };
@@ -238,7 +254,7 @@ export default function AppUpdatePrompt() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ota-update-title"

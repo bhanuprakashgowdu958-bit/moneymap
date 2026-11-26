@@ -47,9 +47,18 @@ export async function checkOtaAvailability() {
   const currentVersion = getCurrentWebVersion();
   const currentBuildTime = getCurrentBuildTime();
 
-  const res = await fetch(`${LIVE_API_ORIGIN}/ota-version.json?t=${Date.now()}`, {
-    cache: 'no-store',
-  });
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+
+  let res;
+  try {
+    res = await fetch(`${LIVE_API_ORIGIN}/ota-version.json?t=${Date.now()}`, {
+      cache: 'no-store',
+      signal: controller ? controller.signal : undefined,
+    });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   if (!res.ok) {
     throw new Error(`Update check returned HTTP ${res.status}`);
   }
