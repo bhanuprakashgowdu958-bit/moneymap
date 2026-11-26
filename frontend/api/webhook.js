@@ -86,10 +86,10 @@ const PROMO_NOISE_PATTERNS = [
 ];
 
 const CONFIRMED_TXN_RE =
-  /\b(?:(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\b.*\b(?:a\/c|ac\.?|acct|account|card|upi|vpa|mob\s*bk|neft|imps|rtgs|trf|ref|rs\.?|inr|₹)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+(?:to|via)|received\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+from)\b/i;
+  /\b(?:(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\b[\s\S]*(?:\b(?:a\/c|ac\.?|acct|account|card|upi|vpa|mob\s*bk|neft|imps|rtgs|trf|ref|rs\.?|inr)\b|₹)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+(?:to|via)\b|received\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+from)\b/i;
 
 const STRONG_DEBIT_RE =
-  /\b(?:debited|debit\s+(?:of|from|in|for)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|transfer\s+(?:of|to|from)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+(?:to|via)\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
+  /\b(?:debited|debit\s+(?:of|from|in|for)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:transfer|txn)\s+(?:of|to|from)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+(?:to|via)\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
   /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|(?:cashback|refund|salary|dividend|reimbursement)\s+(?:of\s+)?(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:credited|received|deposited|processed|issued)|(?:credited|received|deposited)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*\s*(?:as\s+)?(?:cashback|refund|salary|dividend|reimbursement))\b/i;

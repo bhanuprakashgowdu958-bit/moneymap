@@ -42,7 +42,7 @@ public final class MoneyMapExpenseWebhook {
     }
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|debit\\s+(?:of|from|in|for)|paid\\s+(?:to|for|at|by|via|rs|inr|₹|[0-9])|payment\\s+(?:of\\s+)?(?:rs|inr|₹|[0-9])|sent\\s+(?:to|via|rs|inr|₹|[0-9])|transferred(?:\\s+(?:to|from))?|transfer\\s+(?:of|to|from)|trf\\s+to|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9]\\s*dr\\.?\\b|you\\s+(?:have\\s+)?(?:paid|sent|transferred))",
+        "(?:debited|debit\\s+(?:of|from|in|for)|paid\\s+(?:to|for|at|by|via|rs|inr|₹|[0-9])|payment\\s+(?:of\\s+)?(?:rs|inr|₹|[0-9])|sent\\s+(?:to|via|rs|inr|₹|[0-9])|transferred(?:\\s+(?:to|from))?|transfer\\s+(?:of|to|from)|txn\\s+of|trf\\s+to|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9]\\s*dr\\.?\\b|you\\s+(?:have\\s+)?(?:paid|sent|transferred))",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -57,18 +57,18 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern CONFIRMED_TXN_SIGNAL = Pattern.compile(
-        "(?:\\b(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\\b.*\\b(?:a/c|\\bac\\.?\\b|acct|account|card|upi|vpa|mob\\s*bk|neft|imps|rtgs|trf|ref|rs\\.?|inr|₹)|\\b(?:paid|sent|transferred)\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+(?:to|via)\\b|\\breceived\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+from\\b)",
+        "(?:\\b(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\\b[\\s\\S]*(?:\\b(?:a/c|ac\\.?|acct|account|card|upi|vpa|mob\\s*bk|neft|imps|rtgs|trf|ref|rs\\.?|inr)\\b|₹)|\\b(?:paid|sent|transferred)\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+(?:to|via)\\b|\\breceived\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+from\\b)",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern HARD_IGNORE_SIGNAL = Pattern.compile(
         "\\b(?:is\\s+your\\s+otp|otp\\s+(?:is|for)|use\\s+otp|enter\\s+otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled|will\\s+be\\s+credited|to\\s+be\\s+credited)\\b",
-        Pattern.CASE_INSENSITIVE
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
 
     private static final Pattern PROMO_SIGNAL = Pattern.compile(
         "\\b(?:otp|mpin|cvv|pre-?approved|get\\s+(?:rs|inr|₹|up\\s*to|flat)|win\\s+(?:rs|inr|₹|up\\s*to)|earn\\s+(?:rs|inr|₹|up\\s*to)|avail\\s+(?:rs|inr|₹|up\\s*to)|unlock\\s+(?:rs|inr|₹)|claim\\s+(?:your|now)|chance\\s+to\\s+win|assured\\s+(?:cashback|reward)|up\\s*to\\s+(?:rs\\.?|inr|₹)|upto\\s+(?:rs\\.?|inr|₹)|flat\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,.]+\\s*(?:off|cashback|discount)|scratch\\s+card|voucher|coupon|promo(?:\\s*code)?|use\\s+code|apply\\s+code|valid\\s+(?:till|until)|limited\\s+period|t&c\\s+apply|terms\\s+apply|congratulations|you(?:'ve|\\s+have)\\s+won|lucky\\s+draw|loan\\s+offer|credit\\s+limit|upgrade\\s+your\\s+card|apply\\s+now|shop\\s+(?:for|worth)|min(?:imum)?\\s+(?:spend|order)|cashback\\s+offer|special\\s+offer)\\b",
-        Pattern.CASE_INSENSITIVE
+        Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
 
     // Supports: "Rs.35", "Rs:35.00", "INR 35", "₹35", "debited by 35.0", "paid 35", "35.00 Rs"
@@ -172,9 +172,11 @@ public final class MoneyMapExpenseWebhook {
         }
 
         Context appCtx = context.getApplicationContext();
+        String sourceTag = (sourcePackage != null && !sourcePackage.isEmpty()) ? sourcePackage : "SMS_BROADCAST";
         long now = System.currentTimeMillis();
         String dedupeKey = buildDedupeKey(rawText);
         if (isDuplicateAndRecord(appCtx, dedupeKey, now)) {
+            appendDiagnosticLog(appCtx, sourceTag, "DEDUPED_LIVE", rawText);
             if (onComplete != null) onComplete.run();
             return;
         }
@@ -185,26 +187,71 @@ public final class MoneyMapExpenseWebhook {
             return;
         }
 
+        recordLoggedSignature(appCtx, dedupeKey, now);
         registerNetworkCallback(appCtx);
 
         EXECUTOR.execute(() -> {
             try {
                 String webhookUrl = MoneyMapPrefs.getWebhookUrl(appCtx);
-                if (webhookUrl == null || webhookUrl.isEmpty() || !isNetworkAvailable(appCtx)) {
+                if (webhookUrl == null || webhookUrl.isEmpty()) {
                     enqueuePending(appCtx, payload);
+                    appendDiagnosticLog(appCtx, sourceTag, "QUEUED_NO_WEBHOOK", rawText);
+                    return;
+                }
+                if (!isNetworkAvailable(appCtx)) {
+                    enqueuePending(appCtx, payload);
+                    appendDiagnosticLog(appCtx, sourceTag, "QUEUED_OFFLINE", rawText);
                     return;
                 }
 
                 flushPendingInternal(appCtx);
 
-                SendResult result = postPayload(appCtx, webhookUrl, payload);
+                SendResult result = postPayload(appCtx, webhookUrl, payload, sourceTag);
                 if (result == SendResult.RETRY_TRANSIENT) {
                     enqueuePending(appCtx, payload);
+                    appendDiagnosticLog(appCtx, sourceTag, "QUEUED_RETRY", rawText);
                 }
             } finally {
                 if (onComplete != null) onComplete.run();
             }
         });
+    }
+
+    /**
+     * Submits a recent SMS found in the device inbox (when READ_SMS is granted) if it was
+     * not already captured live by SMS_RECEIVED or NotificationListenerService.
+     */
+    public static boolean submitHistoricalSmsSync(
+        Context context,
+        String rawText,
+        long smsDateMs,
+        String sender
+    ) {
+        if (context == null || rawText == null || !looksLikeDebitExpense(rawText)) return false;
+        Context appCtx = context.getApplicationContext();
+        String dedupeKey = buildDedupeKey(rawText);
+        if (wasSignatureLoggedNear(appCtx, dedupeKey, smsDateMs, 180_000L)) {
+            return false;
+        }
+
+        long occurredAt = smsDateMs > 0 ? smsDateMs : System.currentTimeMillis();
+        JSONObject payload = buildPayload(rawText, "", rawText, sender, occurredAt);
+        if (payload == null) return false;
+
+        recordLoggedSignature(appCtx, dedupeKey, occurredAt);
+        String webhookUrl = MoneyMapPrefs.getWebhookUrl(appCtx);
+        if (webhookUrl == null || webhookUrl.isEmpty() || !isNetworkAvailable(appCtx)) {
+            enqueuePending(appCtx, payload);
+            appendDiagnosticLog(appCtx, "SMS_INBOX", "QUEUED_OFFLINE", rawText);
+            return true;
+        }
+
+        SendResult result = postPayload(appCtx, webhookUrl, payload, "SMS_INBOX");
+        if (result == SendResult.RETRY_TRANSIENT) {
+            enqueuePending(appCtx, payload);
+            appendDiagnosticLog(appCtx, "SMS_INBOX", "QUEUED_RETRY", rawText);
+        }
+        return result != SendResult.DROP_PERMANENT;
     }
 
     private static String extractAmountString(String text) {
@@ -332,7 +379,7 @@ public final class MoneyMapExpenseWebhook {
                 remaining.add(item);
                 continue;
             }
-            SendResult result = postPayload(context, webhookUrl, item);
+            SendResult result = postPayload(context, webhookUrl, item, "QUEUE_FLUSH");
             if (result == SendResult.RETRY_TRANSIENT) {
                 hitTransientFailure = true;
                 remaining.add(item);
@@ -389,6 +436,11 @@ public final class MoneyMapExpenseWebhook {
         MoneyMapPrefs.setPendingWebhooksJson(context, arr.toString());
     }
 
+    private static final long SIGNATURE_RETENTION_MS = 48L * 60L * 60L * 1000L;
+    private static final int MAX_SIGNATURE_ENTRIES = 120;
+    private static final int MAX_DIAGNOSTIC_LOGS = 20;
+    private static final Object LOG_LOCK = new Object();
+
     private static String buildDedupeKey(String text) {
         boolean hasCredit = CREDIT_SIGNAL.matcher(text).find();
         boolean hasExplicitDebit = DEBIT_SIGNAL.matcher(text).find();
@@ -400,7 +452,96 @@ public final class MoneyMapExpenseWebhook {
         return dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static SendResult postPayload(Context context, String webhookUrl, JSONObject body) {
+    private static void recordLoggedSignature(Context context, String key, long tsMs) {
+        synchronized (DEDUPE_LOCK) {
+            try {
+                long cutoff = System.currentTimeMillis() - SIGNATURE_RETENTION_MS;
+                JSONArray oldArr = new JSONArray(MoneyMapPrefs.getLoggedSignaturesJson(context));
+                JSONArray nextArr = new JSONArray();
+                int start = Math.max(0, oldArr.length() - (MAX_SIGNATURE_ENTRIES - 1));
+                for (int i = start; i < oldArr.length(); i++) {
+                    JSONObject obj = oldArr.optJSONObject(i);
+                    if (obj != null && obj.optLong("ts", 0L) >= cutoff) {
+                        nextArr.put(obj);
+                    }
+                }
+                JSONObject entry = new JSONObject();
+                entry.put("k", key);
+                entry.put("ts", tsMs);
+                nextArr.put(entry);
+                MoneyMapPrefs.setLoggedSignaturesJson(context, nextArr.toString());
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private static boolean wasSignatureLoggedNear(Context context, String key, long tsMs, long windowMs) {
+        synchronized (DEDUPE_LOCK) {
+            try {
+                JSONArray arr = new JSONArray(MoneyMapPrefs.getLoggedSignaturesJson(context));
+                for (int i = arr.length() - 1; i >= 0; i--) {
+                    JSONObject obj = arr.optJSONObject(i);
+                    if (obj == null) continue;
+                    if (key.equals(obj.optString("k", ""))
+                        && Math.abs(tsMs - obj.optLong("ts", 0L)) <= windowMs) {
+                        return true;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return false;
+    }
+
+    public static void recordFilteredEvent(Context context, String source, String pkgOrSender, String rawText) {
+        if (context == null || rawText == null) return;
+        String trimmed = rawText.trim();
+        // Only record non-matching events that look payment/bank related so personal chats are not stored
+        boolean hasFinancialHint = DEBIT_SIGNAL.matcher(trimmed).find()
+            || CREDIT_SIGNAL.matcher(trimmed).find()
+            || GENERIC_BANK_SIGNAL.matcher(trimmed).find()
+            || extractAmountString(trimmed) != null;
+        if (!hasFinancialHint) return;
+        String outcome = HARD_IGNORE_SIGNAL.matcher(trimmed).find()
+            ? "IGNORED_OTP_OR_REQ"
+            : PROMO_SIGNAL.matcher(trimmed).find()
+                ? "IGNORED_PROMO"
+                : extractAmountString(trimmed) == null
+                    ? "SKIPPED_NO_AMOUNT"
+                    : "SKIPPED_NO_SIGNAL";
+        appendDiagnosticLog(context, source + ":" + (pkgOrSender == null ? "" : pkgOrSender), outcome, trimmed);
+    }
+
+    public static void appendDiagnosticLog(Context context, String source, String outcome, String rawText) {
+        if (context == null) return;
+        synchronized (LOG_LOCK) {
+            try {
+                JSONArray existing = new JSONArray(MoneyMapPrefs.getCaptureLogsJson(context));
+                JSONArray next = new JSONArray();
+                String cleanSnippet = (rawText == null ? "" : rawText).replaceAll("\\s+", " ").trim();
+                if (cleanSnippet.length() > 140) {
+                    cleanSnippet = cleanSnippet.substring(0, 140) + "...";
+                }
+                JSONObject item = new JSONObject();
+                item.put("ts", System.currentTimeMillis());
+                item.put("source", source == null ? "UNKNOWN" : source);
+                item.put("outcome", outcome == null ? "UNKNOWN" : outcome);
+                item.put("snippet", cleanSnippet);
+                next.put(item);
+                for (int i = 0; i < Math.min(existing.length(), MAX_DIAGNOSTIC_LOGS - 1); i++) {
+                    next.put(existing.get(i));
+                }
+                MoneyMapPrefs.setCaptureLogsJson(context, next.toString());
+            } catch (Exception ignored) {}
+        }
+    }
+
+    public static int getPendingQueueCount(Context context) {
+        if (context == null) return 0;
+        synchronized (QUEUE_LOCK) {
+            return readQueueLocked(context).size();
+        }
+    }
+
+    private static SendResult postPayload(Context context, String webhookUrl, JSONObject body, String sourceTag) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(webhookUrl);
@@ -427,7 +568,14 @@ public final class MoneyMapExpenseWebhook {
                     }
                 }
                 JSONObject res = new JSONObject(sb.toString());
-                if (!res.optBoolean("ignored", false)) {
+                boolean serverIgnored = res.optBoolean("ignored", false);
+                appendDiagnosticLog(
+                    context,
+                    sourceTag,
+                    serverIgnored ? "WEBHOOK_IGNORED" : "LOGGED_OK",
+                    body.optString("text", "")
+                );
+                if (!serverIgnored) {
                     String budgetAlert = res.optString("budgetAlert", "");
                     if (!budgetAlert.isEmpty() && !"null".equalsIgnoreCase(budgetAlert)) {
                         MoneyMapNotifier.showBudgetAlert(
@@ -441,12 +589,14 @@ public final class MoneyMapExpenseWebhook {
                 return SendResult.SUCCESS;
             }
 
+            appendDiagnosticLog(context, sourceTag, "HTTP_" + code, body.optString("text", ""));
             if (code == 429 || code >= 500) {
                 return SendResult.RETRY_TRANSIENT;
             }
             return SendResult.DROP_PERMANENT;
         } catch (Exception e) {
             Log.w(TAG, "Webhook sync failed (queued for retry): " + e.getMessage());
+            appendDiagnosticLog(context, sourceTag, "NET_ERR", e.getMessage());
             return SendResult.RETRY_TRANSIENT;
         } finally {
             if (conn != null) conn.disconnect();

@@ -79,6 +79,34 @@ export async function requestNativeNotifications() {
   return MoneyMapNative.requestNotificationPermission();
 }
 
+export async function getNativeDiagnostics() {
+  if (!isNativeAndroid()) {
+    return {
+      hasWebhookUrl: false,
+      hasSmsPermission: false,
+      hasReadSmsPermission: false,
+      hasNotificationAccess: false,
+      autoTrackEnabled: false,
+      smsAutoTrackEnabled: false,
+      pendingQueueCount: 0,
+      logs: [],
+    };
+  }
+  const res = await MoneyMapNative.getDiagnostics();
+  let logs = [];
+  try {
+    logs = JSON.parse(res?.logsJson || '[]');
+  } catch {
+    logs = [];
+  }
+  return { ...res, logs: Array.isArray(logs) ? logs : [] };
+}
+
+export async function syncNativeSmsInboxNow() {
+  if (!isNativeAndroid()) return { synced: 0 };
+  return MoneyMapNative.syncSmsInboxNow();
+}
+
 export async function installNativeApkUpdate(apkUrl, onProgress) {
   if (!isNativeAndroid()) return { started: false };
   let listener = null;

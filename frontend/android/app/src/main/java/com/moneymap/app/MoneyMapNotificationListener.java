@@ -97,6 +97,11 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
         boolean isKnownApp = PAYMENT_PACKAGES.contains(pkg.toLowerCase(Locale.ROOT));
         if (!isKnownApp && !MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) return;
 
+        if (isKnownApp && !MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) {
+            MoneyMapExpenseWebhook.recordFilteredEvent(this, "NOTIFICATION", pkg, combined);
+            return;
+        }
+
         MoneyMapExpenseWebhook.submitNotificationAsync(this, title, text, pkg, null);
     }
 

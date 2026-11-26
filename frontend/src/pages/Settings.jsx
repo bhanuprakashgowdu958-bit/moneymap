@@ -16,6 +16,8 @@ import {
   openUsageAccessSettings,
   openAppInfoSettings,
   requestNativeNotifications,
+  getNativeDiagnostics,
+  syncNativeSmsInboxNow,
 } from '../lib/nativeBridge';
 import {
   checkAndPrepareOtaUpdate,
@@ -41,6 +43,9 @@ export default function Settings() {
   const [guardCategory, setGuardCategory] = useState('food-delivery');
   const [showAdvancedAutomation, setShowAdvancedAutomation] = useState(false);
   const [nativeStatus, setNativeStatus] = useState(null);
+  const [nativeDiag, setNativeDiag] = useState(null);
+  const [syncingInbox, setSyncingInbox] = useState(false);
+  const [showDiagLogs, setShowDiagLogs] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const fileInputRef = useRef(null);
   const onAndroidApp = isNativeAndroid();
@@ -48,6 +53,7 @@ export default function Settings() {
   const refreshNativeStatus = useCallback(() => {
     if (!onAndroidApp) return;
     getNativeStatus().then(setNativeStatus).catch(() => {});
+    getNativeDiagnostics().then(setNativeDiag).catch(() => {});
   }, [onAndroidApp]);
 
   useEffect(() => {
@@ -56,7 +62,9 @@ export default function Settings() {
         .then((tok) => {
           if (tok) {
             setWebhookToken(tok);
-            if (onAndroidApp) syncNativeConfig(tok);
+            if (onAndroidApp) {
+              syncNativeConfig(tok).then(refreshNativeStatus).catch(() => {});
+            }
           }
         })
         .catch(() => {});
@@ -562,6 +570,102 @@ export default function Settings() {
                   </button>
                 ) : (
                   <p className="text-xs text-emerald-700 font-semibold">✅ Usage Access Granted</p>
+                )}
+              </div>
+
+              {/* Manual SMS Inbox Sync + Live Diagnostics */}
+              <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">SMS Recovery & Diagnostics</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Scan last 48h bank SMS inbox or check capture status
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={syncingInbox}
+                      onClick={async () => {
+                        setSyncingInbox(true);
+                        try {
+                          if (!nativeStatus?.hasSmsPermission) {
+                            const perm = await requestNativeSmsPermission();
+                            if (!perm?.granted) {
+                              toast.error('Allow SMS permission first to scan bank SMS.');
+                              return;
+                            }
+                          }
+                          await syncNativeConfig(webhookToken);
+                          const res = await syncNativeSmsInboxNow();
+                          refreshNativeStatus();
+                          toast.success(
+                            res?.synced > 0
+                              ? `Synced ${res.synced} missed bank SMS transaction${res.synced > 1 ? 's' : ''}!`
+                              : 'Inbox checked — no missed bank SMS found'
+                          );
+                        } catch {
+                          toast.error('Could not scan SMS inbox');
+                        } finally {
+                          setSyncingInbox(false);
+                        }
+                      }}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                    >
+                      {syncingInbox ? 'Scanning SMS...' : '📩 Sync Bank SMS Now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        refreshNativeStatus();
+                        setShowDiagLogs((s) => !s);
+                      }}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    >
+                      {showDiagLogs ? 'Hide Logs' : 'Capture Logs'}
+                    </button>
+                  </div>
+                </div>
+
+                {nativeDiag && (
+                  <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+                    <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasWebhookUrl ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                      {nativeDiag.hasWebhookUrl ? '✓ Webhook Synced' : '✗ Webhook Not Synced'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasSmsPermission ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                      {nativeDiag.hasSmsPermission ? '✓ SMS Read + Receive' : '✗ SMS Permission Missing'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasNotificationAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                      {nativeDiag.hasNotificationAccess ? '✓ Notification Access' : '✗ Notification Off'}
+                    </span>
+                    {nativeDiag.pendingQueueCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                        ⏳ Queued: {nativeDiag.pendingQueueCount}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {showDiagLogs && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-2.5 space-y-1.5 max-h-56 overflow-y-auto">
+                    {!nativeDiag?.logs?.length ? (
+                      <p className="text-xs text-gray-500">
+                        No SMS or payment notification events captured yet.
+                      </p>
+                    ) : (
+                      nativeDiag.logs.map((item, idx) => (
+                        <div key={`${item.ts}-${idx}`} className="text-[11px] bg-white border border-gray-100 rounded-lg p-2">
+                          <div className="flex items-center justify-between gap-2 font-semibold text-gray-700">
+                            <span className="truncate">{item.source}</span>
+                            <span className="text-blue-700">{item.outcome}</span>
+                          </div>
+                          {item.snippet && (
+                            <p className="text-gray-500 mt-0.5 break-words">{item.snippet}</p>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 )}
               </div>
             </div>

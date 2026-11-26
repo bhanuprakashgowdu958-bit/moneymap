@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
+import android.service.notification.NotificationListenerService;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
@@ -39,7 +40,7 @@ import java.util.concurrent.Executors;
         ),
         @Permission(
             alias = "sms",
-            strings = { Manifest.permission.RECEIVE_SMS }
+            strings = { Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS }
         )
     }
 )
@@ -52,8 +53,10 @@ public class MoneyMapNativePlugin extends Plugin {
     public void load() {
         super.load();
         cleanupOldApkCache();
+        requestNotificationListenerRebind(getContext());
         MoneyMapExpenseWebhook.registerNetworkCallback(getContext());
         MoneyMapExpenseWebhook.flushPendingAsync(getContext());
+        MoneyMapSmsInboxReader.syncRecentInboxAsync(getContext());
         if (MoneyMapPrefs.isAppGuardEnabled(getContext()) && hasUsageStatsAccess(getContext())) {
             Intent svc = new Intent(getContext(), AppGuardService.class);
             ContextCompat.startForegroundService(getContext(), svc);
@@ -66,6 +69,7 @@ public class MoneyMapNativePlugin extends Plugin {
         String budgetCheckBase = call.getString("budgetCheckBase", "");
         MoneyMapPrefs.setConfig(getContext(), webhookUrl, budgetCheckBase);
         MoneyMapExpenseWebhook.flushPendingAsync(getContext());
+        MoneyMapSmsInboxReader.syncRecentInboxAsync(getContext());
         call.resolve();
     }
 
@@ -324,6 +328,44 @@ public class MoneyMapNativePlugin extends Plugin {
         call.resolve(ret);
     }
 
+    @PluginMethod
+    public void getDiagnostics(PluginCall call) {
+        Context ctx = getContext();
+        JSObject ret = new JSObject();
+        String webhookUrl = MoneyMapPrefs.getWebhookUrl(ctx);
+        ret.put("hasWebhookUrl", webhookUrl != null && !webhookUrl.isEmpty());
+        ret.put("hasSmsPermission", hasSmsPermission(ctx));
+        ret.put("hasReadSmsPermission", hasReadSmsPermission(ctx));
+        ret.put("hasNotificationAccess", hasNotificationListenerAccess(ctx));
+        ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(ctx));
+        ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(ctx));
+        ret.put("pendingQueueCount", MoneyMapExpenseWebhook.getPendingQueueCount(ctx));
+        ret.put("logsJson", MoneyMapPrefs.getCaptureLogsJson(ctx));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void syncSmsInboxNow(PluginCall call) {
+        Context ctx = getContext().getApplicationContext();
+        APK_EXECUTOR.execute(() -> {
+            int synced = MoneyMapSmsInboxReader.syncRecentInboxBlocking(ctx);
+            MoneyMapExpenseWebhook.flushPendingAsync(ctx);
+            JSObject ret = new JSObject();
+            ret.put("synced", synced);
+            call.resolve(ret);
+        });
+    }
+
+    public static void requestNotificationListenerRebind(Context context) {
+        if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        if (!hasNotificationListenerAccess(context)) return;
+        try {
+            NotificationListenerService.requestRebind(
+                new ComponentName(context, MoneyMapNotificationListener.class)
+            );
+        } catch (Exception ignored) {}
+    }
+
     private static boolean canInstallPackages(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
         return context.getPackageManager().canRequestPackageInstalls();
@@ -331,6 +373,12 @@ public class MoneyMapNativePlugin extends Plugin {
 
     private static boolean hasSmsPermission(Context context) {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS)
+            == PackageManager.PERMISSION_GRANTED
+            && hasReadSmsPermission(context);
+    }
+
+    private static boolean hasReadSmsPermission(Context context) {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS)
             == PackageManager.PERMISSION_GRANTED;
     }
 

@@ -42,8 +42,12 @@ public class MoneyMapSmsReceiver extends BroadcastReceiver {
         PendingResult pendingResult = goAsync();
         AtomicInteger remaining = new AtomicInteger(bySender.size());
 
-        for (StringBuilder fullBody : bySender.values()) {
-            String text = fullBody.toString().trim();
+        for (Map.Entry<String, StringBuilder> entry : bySender.entrySet()) {
+            String text = entry.getValue().toString().trim();
+            String sender = entry.getKey();
+            if (!MoneyMapExpenseWebhook.looksLikeDebitExpense(text)) {
+                MoneyMapExpenseWebhook.recordFilteredEvent(context, "SMS_BROADCAST", sender, text);
+            }
             MoneyMapExpenseWebhook.submitAsync(context, text, () -> {
                 if (remaining.decrementAndGet() == 0 && pendingResult != null) {
                     pendingResult.finish();

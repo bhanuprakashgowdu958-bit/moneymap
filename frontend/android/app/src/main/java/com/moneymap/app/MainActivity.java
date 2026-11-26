@@ -29,6 +29,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        MoneyMapNativePlugin.requestNotificationListenerRebind(this);
         MoneyMapExpenseWebhook.flushPendingAsync(this);
+        MoneyMapSmsInboxReader.syncRecentInboxAsync(this);
     }
 }
