@@ -55,6 +55,8 @@ export default function AddExpense() {
   const [form, setForm] = useState({
     type:          'expense',
     title:         '',
+    counterparty:  '',
+    accountHint:   '',
     amount:        '',
     category:      'food-delivery',
     date:          initialDate,
@@ -102,6 +104,8 @@ export default function AddExpense() {
         type:          nextType,
         amount:        parsed.amount || prev.amount,
         title:         parsed.title !== 'Bank Debit Expense' && parsed.title !== 'Expense' ? parsed.title : prev.title,
+        counterparty:  parsed.counterparty || prev.counterparty,
+        accountHint:   parsed.accountHint || prev.accountHint,
         category:      activeCats[parsed.category] ? parsed.category : (nextType === 'income' ? 'upi-received' : prev.category),
         paymentMethod: parsed.paymentMethod || prev.paymentMethod,
         date:          parsed.date || prev.date,
@@ -226,6 +230,8 @@ export default function AddExpense() {
       await addExpense(user.uid, {
         ...form,
         title: finalTitle,
+        counterparty: form.counterparty?.trim() || form.title.trim() || '',
+        accountHint: form.accountHint || '',
         amount: numAmount,
         receiptUrl,
         receiptPublicId,
@@ -452,9 +458,9 @@ export default function AddExpense() {
           <input
             type="text"
             className="input-field"
-            placeholder={isIncome ? 'e.g. From Rahul, Monthly Salary, Amazon Refund...' : 'e.g. Zomato dinner, Uber ride, Blinkit...'}
+            placeholder={isIncome ? 'e.g. Leelu Bro, Monthly Salary, Amazon Refund...' : 'e.g. Dhanush Capgemini, Zomato, Uber...'}
             value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            onChange={(e) => setForm({ ...form, title: e.target.value, counterparty: e.target.value })}
           />
         </div>
 

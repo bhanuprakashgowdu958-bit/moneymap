@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { getExpenses, getBudgets } from '../lib/firestore';
-import { CATEGORIES, formatCurrency, getCategoryMeta } from '../lib/constants';
+import { subscribeToExpenses, subscribeToBudgets } from '../lib/firestore';
+import { CATEGORIES, formatCurrency } from '../lib/constants';
 import { buildBudgetAlert } from '../lib/budgetAlerts';
 import SpendingCalendar from '../components/SpendingCalendar';
+import TransactionRow from '../components/TransactionRow';
 
 const RADIAN = Math.PI / 180;
 const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
@@ -34,102 +35,101 @@ function StatCard({ icon, label, value, sub, subColor = 'text-gray-500', bgColor
 export default function Dashboard() {
   const { user, displayName, monthlyIncome, currency } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats]     = useState({ total: 0, incomeTotal: 0, stats: [] });
-  const [lastMonth, setLastMonth] = useState(0);
-  const [todayTotal, setTodayTotal] = useState(0);
-  const [weekly, setWeekly]   = useState([]);
-  const [recent, setRecent]   = useState([]);
-  const [budgets, setBudgets] = useState([]);
+  const [rawBudgets, setRawBudgets] = useState([]);
   const [allExpenses, setAllExpenses] = useState([]);
 
-  const loadDashboardData = useCallback(() => {
-    if (!user) return;
+  useEffect(() => {
+    if (!user?.uid) return undefined;
     const now = new Date();
     const month = now.getMonth() + 1;
-    const year  = now.getFullYear();
-    const prevMonth = month === 1 ? 12 : month - 1;
-    const prevYear  = month === 1 ? year - 1 : year;
+    const year = now.getFullYear();
 
-    Promise.all([
-      getExpenses(user.uid),
-      getBudgets(user.uid, month, year),
-    ])
-      .then(([allExp, bud]) => {
+    const unsubExpenses = subscribeToExpenses(
+      user.uid,
+      (allExp) => {
         setAllExpenses(allExp);
-        // Current month calculations (expenses vs income separated accurately)
-        const curTransactions = allExp.filter((e) => {
-          const d = new Date(e.date);
-          return d.getMonth() + 1 === month && d.getFullYear() === year;
-        });
-        const curExpenses = curTransactions.filter((e) => e.type !== 'income');
-        const curIncomes = curTransactions.filter((e) => e.type === 'income');
-        const curTotal = curExpenses.reduce((s, e) => s + e.amount, 0);
-        const curIncomeTotal = curIncomes.reduce((s, e) => s + e.amount, 0);
-
-        const byCategory = {};
-        curExpenses.forEach((e) => {
-          if (!byCategory[e.category]) byCategory[e.category] = { total: 0, count: 0 };
-          byCategory[e.category].total += e.amount;
-          byCategory[e.category].count += 1;
-        });
-        const statsArr = Object.entries(byCategory)
-          .map(([cat, v]) => ({ _id: cat, ...v }))
-          .sort((a, b) => b.total - a.total);
-
-        setStats({ total: curTotal, incomeTotal: curIncomeTotal, stats: statsArr, expenses: curExpenses });
-
-        // Previous month calculation (expenses only)
-        const prevTotal = allExp
-          .filter((e) => {
-            if (e.type === 'income') return false;
-            const d = new Date(e.date);
-            return d.getMonth() + 1 === prevMonth && d.getFullYear() === prevYear;
-          })
-          .reduce((s, e) => s + e.amount, 0);
-        setLastMonth(prevTotal);
-
-        // Today's total (expenses only)
-        const todayStr = now.toDateString();
-        const todaySum = curExpenses
-          .filter((e) => new Date(e.date).toDateString() === todayStr)
-          .reduce((s, e) => s + e.amount, 0);
-        setTodayTotal(todaySum);
-
-        // Weekly chart data (last 7 days, expenses only)
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const dayMap = {};
-        allExp.forEach((e) => {
-          if (e.type === 'income') return;
-          const d = new Date(e.date);
-          if (d >= sevenDaysAgo) {
-            const key = d.toISOString().split('T')[0];
-            dayMap[key] = (dayMap[key] || 0) + e.amount;
-          }
-        });
-        setWeekly(Object.entries(dayMap).map(([_id, total]) => ({ _id, total })));
-
-        // Recent 5 expenses
-        setRecent(allExp.slice(0, 5));
-
-        // Merge budgets with spending
-        const spendMap = {};
-        statsArr.forEach((s) => { spendMap[s._id] = s.total; });
-        setBudgets(bud.map((b) => ({
-          ...b,
-          spent: spendMap[b.category] || 0,
-          percentage: Math.round(((spendMap[b.category] || 0) / (b.limit || 1)) * 100),
-        })));
-      })
-      .catch((err) => {
+        setLoading(false);
+      },
+      (err) => {
         console.warn('Dashboard data load notice:', err);
-      })
-      .finally(() => setLoading(false));
-  }, [user]);
+        setLoading(false);
+      }
+    );
+    const unsubBudgets = subscribeToBudgets(user.uid, month, year, setRawBudgets);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
+    return () => {
+      unsubExpenses();
+      unsubBudgets();
+    };
+  }, [user?.uid]);
+
+  const { stats, lastMonth, todayTotal, weekly, recent, budgets } = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+
+    const curTransactions = allExpenses.filter((e) => {
+      const d = new Date(e.date);
+      return d.getMonth() + 1 === month && d.getFullYear() === year;
+    });
+    const curExpenses = curTransactions.filter((e) => e.type !== 'income');
+    const curIncomes = curTransactions.filter((e) => e.type === 'income');
+    const curTotal = curExpenses.reduce((s, e) => s + e.amount, 0);
+    const curIncomeTotal = curIncomes.reduce((s, e) => s + e.amount, 0);
+
+    const byCategory = {};
+    curExpenses.forEach((e) => {
+      if (!byCategory[e.category]) byCategory[e.category] = { total: 0, count: 0 };
+      byCategory[e.category].total += e.amount;
+      byCategory[e.category].count += 1;
+    });
+    const statsArr = Object.entries(byCategory)
+      .map(([cat, v]) => ({ _id: cat, ...v }))
+      .sort((a, b) => b.total - a.total);
+
+    const prevTotal = allExpenses
+      .filter((e) => {
+        if (e.type === 'income') return false;
+        const d = new Date(e.date);
+        return d.getMonth() + 1 === prevMonth && d.getFullYear() === prevYear;
+      })
+      .reduce((s, e) => s + e.amount, 0);
+
+    const todayStr = now.toDateString();
+    const todaySum = curExpenses
+      .filter((e) => new Date(e.date).toDateString() === todayStr)
+      .reduce((s, e) => s + e.amount, 0);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const dayMap = {};
+    allExpenses.forEach((e) => {
+      if (e.type === 'income') return;
+      const d = new Date(e.date);
+      if (d >= sevenDaysAgo) {
+        const key = d.toISOString().split('T')[0];
+        dayMap[key] = (dayMap[key] || 0) + e.amount;
+      }
+    });
+
+    const spendMap = {};
+    statsArr.forEach((s) => { spendMap[s._id] = s.total; });
+
+    return {
+      stats: { total: curTotal, incomeTotal: curIncomeTotal, stats: statsArr, expenses: curExpenses },
+      lastMonth: prevTotal,
+      todayTotal: todaySum,
+      weekly: Object.entries(dayMap).map(([_id, total]) => ({ _id, total })),
+      recent: allExpenses.slice(0, 5),
+      budgets: rawBudgets.map((b) => ({
+        ...b,
+        spent: spendMap[b.category] || 0,
+        percentage: Math.round(((spendMap[b.category] || 0) / (b.limit || 1)) * 100),
+      })),
+    };
+  }, [allExpenses, rawBudgets]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -337,23 +337,16 @@ export default function Dashboard() {
             <Link to="/expenses" className="text-sm text-blue-600 font-semibold hover:underline">View all →</Link>
           </div>
           {recent.length > 0 ? (
-            <div className="space-y-3">
-              {recent.map((e) => {
-                const isIncome = e.type === 'income';
-                const cat = getCategoryMeta(e.category, e.type);
-                return (
-                  <div key={e.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ backgroundColor: cat?.bgColor }}>{cat?.icon}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{e.title}</p>
-                      <p className="text-xs text-gray-400">{cat?.label} · {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
-                    </div>
-                    <span className={`text-sm font-bold flex-shrink-0 tabular-nums ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
-                      {isIncome ? '+' : ''}{formatCurrency(e.amount, currency)}
-                    </span>
-                  </div>
-                );
-              })}
+            <div className="space-y-1.5">
+              {recent.map((e, idx) => (
+                <TransactionRow
+                  key={e.id}
+                  transaction={e}
+                  currency={currency}
+                  compact
+                  showDivider={idx < recent.length - 1}
+                />
+              ))}
             </div>
           ) : (
             <div className="text-center py-8 text-gray-400">

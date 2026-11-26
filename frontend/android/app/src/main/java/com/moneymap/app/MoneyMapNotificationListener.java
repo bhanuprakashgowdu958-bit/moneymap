@@ -50,7 +50,7 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
         boolean isKnownApp = PAYMENT_PACKAGES.contains(pkg.toLowerCase(Locale.ROOT));
         if (!isKnownApp && !MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) return;
 
-        MoneyMapExpenseWebhook.submitAsync(this, combined, null);
+        MoneyMapExpenseWebhook.submitNotificationAsync(this, title, text, pkg, null);
     }
 
     private static String charSeqToString(CharSequence cs) {

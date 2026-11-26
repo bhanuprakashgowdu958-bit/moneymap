@@ -198,3 +198,31 @@ export const getBudgetStatus = (percentage) => {
   if (percentage >= 50) return { label: 'Moderate', color: 'text-blue-600', bg: 'bg-blue-500' };
   return { label: 'On Track', color: 'text-emerald-600', bg: 'bg-emerald-500' };
 };
+
+/**
+ * Normalizes a transaction (expense or income, including legacy webhook records)
+ * into clean counterparty display metadata for UI rows.
+ */
+export function getTransactionDisplay(transaction) {
+  const isIncome = transaction?.type === 'income';
+  const cat = getCategoryMeta(transaction?.category, transaction?.type);
+  const paymentMeta = PAYMENT_METHODS.find((p) => p.value === transaction?.paymentMethod) || PAYMENT_METHODS[0];
+
+  let rawName = String(transaction?.counterparty || transaction?.title || '').trim();
+  if (isIncome) {
+    rawName = rawName.replace(/^from\s+/i, '').trim();
+  }
+  if (!rawName || ['you', 'your', 'yours'].includes(rawName.toLowerCase())) {
+    rawName = cat?.label || (isIncome ? 'UPI Transfer' : 'Expense');
+  }
+
+  return {
+    isIncome,
+    cat,
+    paymentMeta,
+    directionLabel: isIncome ? 'Received from' : 'Paid to',
+    railLabel: isIncome ? 'Credited to' : 'Debited from',
+    railSource: transaction?.accountHint || paymentMeta.label,
+    displayName: rawName,
+  };
+}

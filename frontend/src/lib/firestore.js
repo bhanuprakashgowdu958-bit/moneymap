@@ -6,6 +6,7 @@ import {
   deleteDoc,
   getDocs,
   getDoc,
+  onSnapshot,
   doc,
   query,
   where,
@@ -290,6 +291,7 @@ export async function addExpense(uid, data) {
   const storageKey = getExpenseStorageKey(uid);
   const currentExpenses = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoExpenses() : []);
   saveLocal(storageKey, [newExpense, ...currentExpenses]);
+  emitLocalExpenseUpdate(uid);
 
   // 2. Sync to Firestore in background
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
@@ -323,6 +325,7 @@ export async function updateExpense(uid, expenseId, data) {
       : e
   );
   saveLocal(storageKey, updated);
+  emitLocalExpenseUpdate(uid);
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
@@ -346,6 +349,7 @@ export async function deleteExpense(uid, expenseId) {
   const storageKey = getExpenseStorageKey(uid);
   const expenses = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoExpenses() : []);
   saveLocal(storageKey, expenses.filter((e) => e.id !== expenseId));
+  emitLocalExpenseUpdate(uid);
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
@@ -356,7 +360,56 @@ export async function deleteExpense(uid, expenseId) {
   }
 }
 
-export async function getExpenses(uid, { month, year, category, type } = {}) {
+const LOCAL_EXPENSES_EVENT = 'moneymap:expenses-updated';
+const LOCAL_BUDGETS_EVENT = 'moneymap:budgets-updated';
+
+function emitLocalUpdate(eventName, uid) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(eventName, { detail: { uid } }));
+  }
+}
+
+function emitLocalExpenseUpdate(uid) {
+  emitLocalUpdate(LOCAL_EXPENSES_EVENT, uid);
+}
+
+function normalizeFirestoreExpenseDoc(d) {
+  const data = d.data();
+  return {
+    id: d.id,
+    ...data,
+    type: data.type === 'income' ? 'income' : 'expense',
+    date: data.date?.toDate?.() ?? new Date(data.date),
+  };
+}
+
+function loadCachedExpenses(uid) {
+  const defaultData = isDemoUser(uid) ? getInitialDemoExpenses() : [];
+  return loadLocal(getExpenseStorageKey(uid), defaultData).map((e) => ({
+    ...e,
+    type: e.type === 'income' ? 'income' : 'expense',
+    date: new Date(e.date),
+  }));
+}
+
+export function applyExpenseFilters(expenses, { month, year, category, type } = {}) {
+  let result = expenses;
+  if (month && year) {
+    result = result.filter((e) => {
+      const d = new Date(e.date);
+      return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
+    });
+  }
+  if (type && type !== 'all') {
+    result = result.filter((e) => e.type === type);
+  }
+  if (category && category !== 'all') {
+    result = result.filter((e) => e.category === category);
+  }
+  return result;
+}
+
+export async function getExpenses(uid, filters = {}) {
   let expenses = [];
   let fetchedFromFirestore = false;
 
@@ -367,12 +420,7 @@ export async function getExpenses(uid, { month, year, category, type } = {}) {
       const q = query(ref, orderBy('date', 'desc'));
       const snap = await withTimeout(getDocs(q), FIRESTORE_READ_TIMEOUT_MS, null);
       if (snap && snap.docs) {
-        expenses = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-          type: d.data().type === 'income' ? 'income' : 'expense',
-          date: d.data().date?.toDate?.() ?? new Date(d.data().date),
-        }));
+        expenses = snap.docs.map(normalizeFirestoreExpenseDoc);
         fetchedFromFirestore = true;
         // Keep user's isolated local cache in sync
         saveLocal(getExpenseStorageKey(uid), expenses);
@@ -383,32 +431,59 @@ export async function getExpenses(uid, { month, year, category, type } = {}) {
   }
 
   // If not fetched from Firestore, load from user's isolated storage
-  // Real users start with [] (EMPTY), demo users start with sample data
   if (!fetchedFromFirestore) {
-    const defaultData = isDemoUser(uid) ? getInitialDemoExpenses() : [];
-    expenses = loadLocal(getExpenseStorageKey(uid), defaultData).map((e) => ({
-      ...e,
-      type: e.type === 'income' ? 'income' : 'expense',
-      date: new Date(e.date),
-    }));
+    expenses = loadCachedExpenses(uid);
   }
 
-  if (month && year) {
-    expenses = expenses.filter((e) => {
-      const d = new Date(e.date);
-      return d.getMonth() + 1 === Number(month) && d.getFullYear() === Number(year);
-    });
+  return applyExpenseFilters(expenses, filters);
+}
+
+/**
+ * Subscribes to live Firestore updates for a user's transactions so app and website
+ * stay synchronized in real time when open simultaneously.
+ */
+export function subscribeToExpenses(uid, onData, onError) {
+  if (!uid) return () => {};
+
+  const cached = loadCachedExpenses(uid);
+  if (cached.length > 0 || isDemoUser(uid) || !isFirebaseConfigured || !db) {
+    onData(cached);
   }
 
-  if (type && type !== 'all') {
-    expenses = expenses.filter((e) => e.type === type);
+  const handleLocalEvent = (event) => {
+    if (!event?.detail?.uid || event.detail.uid === uid) {
+      onData(loadCachedExpenses(uid));
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener(LOCAL_EXPENSES_EVENT, handleLocalEvent);
   }
 
-  if (category && category !== 'all') {
-    expenses = expenses.filter((e) => e.category === category);
+  let unsubFirestore = null;
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
+    const ref = collection(db, 'users', uid, 'expenses');
+    const q = query(ref, orderBy('date', 'desc'));
+    unsubFirestore = onSnapshot(
+      q,
+      (snap) => {
+        const expenses = snap.docs.map(normalizeFirestoreExpenseDoc);
+        saveLocal(getExpenseStorageKey(uid), expenses);
+        onData(expenses);
+      },
+      (err) => {
+        console.warn('Firestore subscribeToExpenses notice:', err.message);
+        onData(loadCachedExpenses(uid));
+        if (onError) onError(err);
+      }
+    );
   }
 
-  return expenses;
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(LOCAL_EXPENSES_EVENT, handleLocalEvent);
+    }
+  };
 }
 
 export async function getRecentExpenses(uid, count = 5, preloadedExpenses = null) {
@@ -485,6 +560,7 @@ export async function setBudget(uid, { category, limit, month, year, alertAt = 8
     budgets.push(entry);
   }
   saveLocal(storageKey, budgets);
+  emitLocalUpdate(LOCAL_BUDGETS_EVENT, uid);
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {
@@ -522,10 +598,54 @@ export async function getBudgets(uid, month, year) {
   return all.filter((b) => b.month === month && b.year === year);
 }
 
+export function subscribeToBudgets(uid, month, year, onData) {
+  if (!uid) return () => {};
+  const storageKey = getBudgetStorageKey(uid);
+  const loadCached = () => {
+    const defaultBudgets = isDemoUser(uid) ? getInitialDemoBudgets() : [];
+    return loadLocal(storageKey, defaultBudgets).filter((b) => b.month === month && b.year === year);
+  };
+
+  onData(loadCached());
+
+  const handleLocalEvent = (event) => {
+    if (!event?.detail?.uid || event.detail.uid === uid) {
+      onData(loadCached());
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener(LOCAL_BUDGETS_EVENT, handleLocalEvent);
+  }
+
+  let unsubFirestore = null;
+  if (isFirebaseConfigured && db && !isDemoUser(uid)) {
+    const ref = collection(db, 'users', uid, 'budgets');
+    const q = query(ref, where('month', '==', month), where('year', '==', year));
+    unsubFirestore = onSnapshot(
+      q,
+      (snap) => {
+        const budgets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        saveLocal(storageKey, budgets);
+        onData(budgets);
+      },
+      (err) => {
+        console.warn('Firestore subscribeToBudgets notice:', err.message);
+      }
+    );
+  }
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(LOCAL_BUDGETS_EVENT, handleLocalEvent);
+    }
+  };
+}
+
 export async function deleteBudget(uid, budgetId) {
   const storageKey = getBudgetStorageKey(uid);
   const all = loadLocal(storageKey, isDemoUser(uid) ? getInitialDemoBudgets() : []);
   saveLocal(storageKey, all.filter((b) => b.id !== budgetId));
+  emitLocalUpdate(LOCAL_BUDGETS_EVENT, uid);
 
   if (isFirebaseConfigured && db && !isDemoUser(uid)) {
     try {

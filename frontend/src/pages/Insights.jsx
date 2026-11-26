@@ -1,38 +1,69 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { getMonthlyStats } from '../lib/firestore';
+import { subscribeToExpenses } from '../lib/firestore';
 import { CATEGORIES, formatCurrency } from '../lib/constants';
 import toast from 'react-hot-toast';
 
 export default function Insights() {
-  const { user, currency, monthlyIncome } = useAuth();
-  const [stats,       setStats]       = useState([]);
-  const [total,       setTotal]       = useState(0);
-  const [incomeTotal, setIncomeTotal] = useState(0);
-  const [loading,     setLoading]     = useState(true);
-  const [month,    setMonth]    = useState(new Date().getMonth() + 1);
-  const [year]                  = useState(new Date().getFullYear());
-  const [lastMonth, setLastMonth] = useState(0);
+  const { user, currency } = useAuth();
+  const [allExpenses, setAllExpenses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [month, setMonth] = useState(() => new Date().getMonth() + 1);
+  const [year] = useState(() => new Date().getFullYear());
 
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
+    if (!user?.uid) return undefined;
+    const unsub = subscribeToExpenses(
+      user.uid,
+      (items) => {
+        setAllExpenses(items);
+        setLoading(false);
+      },
+      () => {
+        toast.error('Failed to load insights');
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [user?.uid]);
+
+  const { stats, total, incomeTotal, lastMonth } = useMemo(() => {
     const prevMonth = month === 1 ? 12 : month - 1;
-    const prevYear  = month === 1 ? year - 1 : year;
-    Promise.all([
-      getMonthlyStats(user.uid, month, year),
-      getMonthlyStats(user.uid, prevMonth, prevYear),
-    ])
-      .then(([cur, prev]) => {
-        setStats(cur.stats);
-        setTotal(cur.total);
-        setIncomeTotal(cur.incomeTotal || 0);
-        setLastMonth(prev.total);
+    const prevYear = month === 1 ? year - 1 : year;
+
+    const curTransactions = allExpenses.filter((e) => {
+      const d = new Date(e.date);
+      return d.getMonth() + 1 === month && d.getFullYear() === year;
+    });
+    const curExpenses = curTransactions.filter((e) => e.type !== 'income');
+    const curIncomes = curTransactions.filter((e) => e.type === 'income');
+
+    const byCategory = {};
+    curExpenses.forEach((e) => {
+      if (!byCategory[e.category]) byCategory[e.category] = { total: 0, count: 0 };
+      byCategory[e.category].total += e.amount;
+      byCategory[e.category].count += 1;
+    });
+    const curStats = Object.entries(byCategory)
+      .map(([category, v]) => ({ _id: category, ...v }))
+      .sort((a, b) => b.total - a.total);
+
+    const prevTotal = allExpenses
+      .filter((e) => {
+        if (e.type === 'income') return false;
+        const d = new Date(e.date);
+        return d.getMonth() + 1 === prevMonth && d.getFullYear() === prevYear;
       })
-      .catch(() => toast.error('Failed to load insights'))
-      .finally(() => setLoading(false));
-  }, [user, month]);
+      .reduce((s, e) => s + e.amount, 0);
+
+    return {
+      stats: curStats,
+      total: curExpenses.reduce((s, e) => s + e.amount, 0),
+      incomeTotal: curIncomes.reduce((s, e) => s + e.amount, 0),
+      lastMonth: prevTotal,
+    };
+  }, [allExpenses, month, year]);
 
   const topCategory = stats[0];
   const barData = stats.map((s) => ({

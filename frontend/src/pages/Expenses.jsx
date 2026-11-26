@@ -1,48 +1,55 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { deleteExpense, getExpenses } from '../lib/firestore';
+import { applyExpenseFilters, deleteExpense, subscribeToExpenses } from '../lib/firestore';
 import {
   CATEGORIES,
   INCOME_CATEGORIES,
-  PAYMENT_METHODS,
   formatCurrency,
-  formatDate,
-  getCategoryMeta,
 } from '../lib/constants';
+import TransactionRow from '../components/TransactionRow';
 import toast from 'react-hot-toast';
 
 export default function Expenses() {
   const { user, currency } = useAuth();
-  const [expenses, setExpenses] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const now = new Date();
-  const [filter, setFilter] = useState({
-    type: 'all',
-    category: 'all',
-    month: now.getMonth() + 1,
-    year: now.getFullYear(),
+  const [allExpenses, setAllExpenses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState(() => {
+    const now = new Date();
+    return {
+      type: 'all',
+      category: 'all',
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+    };
   });
 
-  const fetchExpenses = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const data = await getExpenses(user.uid, filter);
-      setExpenses(data);
-    } catch {
-      toast.error('Failed to load transactions');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    const unsub = subscribeToExpenses(
+      user.uid,
+      (items) => {
+        setAllExpenses(items);
+        setLoading(false);
+      },
+      () => {
+        toast.error('Failed to load transactions');
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [user?.uid]);
 
-  useEffect(() => { fetchExpenses(); }, [filter, user]);
+  const expenses = useMemo(
+    () => applyExpenseFilters(allExpenses, filter),
+    [allExpenses, filter]
+  );
 
   const handleDelete = async (item) => {
-    if (!window.confirm(`Delete "${item.title}" (${formatCurrency(item.amount, currency)})?`)) return;
+    const label = item.displayName || item.title;
+    if (!window.confirm(`Delete "${label}" (${formatCurrency(item.amount, currency)})?`)) return;
     try {
       await deleteExpense(user.uid, item.id);
-      setExpenses((prev) => prev.filter((e) => e.id !== item.id));
+      setAllExpenses((prev) => prev.filter((e) => e.id !== item.id));
       toast.success('Transaction deleted');
     } catch {
       toast.error('Failed to delete transaction');
@@ -149,71 +156,15 @@ export default function Expenses() {
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
-          {expenses.map((e, idx) => {
-            const isIncome = e.type === 'income';
-            const cat = getCategoryMeta(e.category, e.type);
-            return (
-              <div
-                key={e.id}
-                className={`flex items-center gap-3 sm:gap-4 px-3.5 py-3.5 sm:px-5 sm:py-4 hover:bg-gray-50 transition-colors ${
-                  idx < expenses.length - 1 ? 'border-b border-gray-100' : ''
-                }`}
-              >
-                <div
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-lg sm:text-xl flex-shrink-0"
-                  style={{ backgroundColor: cat?.bgColor || '#f8fafc' }}
-                >
-                  {cat?.icon || '📦'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                    <p className="font-semibold text-sm sm:text-base text-gray-800 truncate">{e.title}</p>
-                    {isIncome && (
-                      <span className="badge-green text-[10px] sm:text-xs">Income</span>
-                    )}
-                    {e.isRecurring && <span className="badge-blue text-[10px] sm:text-xs">🔄 Recurring</span>}
-                    {e.receiptUrl && (
-                      <a
-                        href={e.receiptUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-blue-500 hover:underline flex items-center gap-0.5"
-                      >
-                        📷 Receipt
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5 flex-wrap">
-                    <span className="text-xs text-gray-400">{formatDate(e.date)}</span>
-                    <span className="text-gray-200">·</span>
-                    <span className="text-xs" style={{ color: cat?.textColor }}>{cat?.label}</span>
-                    <span className="text-gray-200">·</span>
-                    <span className="text-xs text-gray-400 capitalize">
-                      {PAYMENT_METHODS.find((p) => p.value === e.paymentMethod)?.icon} {e.paymentMethod}
-                    </span>
-                  </div>
-                  {e.note && <p className="text-xs text-gray-400 mt-0.5 truncate">{e.note}</p>}
-                </div>
-                <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                  <p
-                    className={`font-bold text-sm sm:text-base tabular-nums ${
-                      isIncome ? 'text-emerald-600' : 'text-gray-900'
-                    }`}
-                  >
-                    {isIncome ? '+' : ''}{formatCurrency(e.amount, currency)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(e)}
-                    aria-label={`Delete ${e.title}`}
-                    className="text-xs text-gray-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {expenses.map((e, idx) => (
+            <TransactionRow
+              key={e.id}
+              transaction={e}
+              currency={currency}
+              onDelete={handleDelete}
+              showDivider={idx < expenses.length - 1}
+            />
+          ))}
         </div>
       )}
     </div>

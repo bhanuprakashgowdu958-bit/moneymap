@@ -29,17 +29,17 @@ public final class MoneyMapExpenseWebhook {
     private static final long DEDUPE_WINDOW_MS = 30_000L;
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|paid\\s+to|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|purchase|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
+        "(?:debited|paid\\s+to|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|charged|purchase|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern CREDIT_SIGNAL = Pattern.compile(
-        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|cr\\.?\\s+(?:to|by))",
+        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s+(?:to|by))",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern GENERIC_BANK_SIGNAL = Pattern.compile(
-        "(?:upi|a/c|acct)",
+        "(?:upi|vpa|a/c|acct|account)",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -73,6 +73,24 @@ public final class MoneyMapExpenseWebhook {
      * notification listeners fire for the same transaction).
      */
     public static void submitAsync(Context context, String rawText, Runnable onComplete) {
+        submitNotificationAsync(context, null, rawText, null, onComplete);
+    }
+
+    /**
+     * Enqueues a notification/SMS upload while preserving separate notification title,
+     * body text, and source package so the webhook can isolate sender/recipient names.
+     */
+    public static void submitNotificationAsync(
+        Context context,
+        String notificationTitle,
+        String notificationText,
+        String sourcePackage,
+        Runnable onComplete
+    ) {
+        String safeTitle = notificationTitle == null ? "" : notificationTitle.trim();
+        String safeBody = notificationText == null ? "" : notificationText.trim();
+        String rawText = (safeTitle + " " + safeBody).trim();
+
         if (context == null || !looksLikeDebitExpense(rawText)) {
             if (onComplete != null) onComplete.run();
             return;
@@ -100,7 +118,7 @@ public final class MoneyMapExpenseWebhook {
         Context appCtx = context.getApplicationContext();
         EXECUTOR.execute(() -> {
             try {
-                postToWebhook(appCtx, webhookUrl, rawText.trim());
+                postToWebhook(appCtx, webhookUrl, rawText, safeTitle, safeBody, sourcePackage);
             } finally {
                 if (onComplete != null) onComplete.run();
             }
@@ -128,7 +146,14 @@ public final class MoneyMapExpenseWebhook {
         }
     }
 
-    private static void postToWebhook(Context context, String webhookUrl, String smsText) {
+    private static void postToWebhook(
+        Context context,
+        String webhookUrl,
+        String smsText,
+        String notificationTitle,
+        String notificationText,
+        String sourcePackage
+    ) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(webhookUrl);
@@ -141,6 +166,15 @@ public final class MoneyMapExpenseWebhook {
 
             JSONObject body = new JSONObject();
             body.put("text", smsText);
+            if (notificationTitle != null && !notificationTitle.isEmpty()) {
+                body.put("notificationTitle", notificationTitle);
+            }
+            if (notificationText != null && !notificationText.isEmpty()) {
+                body.put("notificationText", notificationText);
+            }
+            if (sourcePackage != null && !sourcePackage.isEmpty()) {
+                body.put("sourcePackage", sourcePackage);
+            }
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
 
             try (OutputStream os = conn.getOutputStream()) {

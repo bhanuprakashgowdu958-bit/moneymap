@@ -14,7 +14,8 @@ import {
   subMonths,
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus } from 'lucide-react';
-import { formatCurrency, getCategoryMeta } from '../lib/constants';
+import { formatCurrency } from '../lib/constants';
+import TransactionRow from './TransactionRow';
 
 function toDayKey(dateInput) {
   const d = new Date(dateInput);
@@ -267,32 +268,15 @@ export default function SpendingCalendar({ expenses = [], currency = '₹' }) {
           {/* Expense List for Selected Day */}
           <div className="flex-1 py-2.5 space-y-2 max-h-[210px] overflow-y-auto">
             {selectedData.items.length > 0 ? (
-              selectedData.items.map((e) => {
-                const isIncome = e.type === 'income';
-                const cat = getCategoryMeta(e.category, e.type);
-                return (
-                  <div
-                    key={e.id}
-                    className="flex items-center gap-3 p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm"
-                  >
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0"
-                      style={{ backgroundColor: cat.bgColor }}
-                    >
-                      {cat.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{e.title}</p>
-                      <p className="text-[11px] text-gray-400">
-                        {cat.label} · {e.paymentMethod?.toUpperCase() || 'UPI'}
-                      </p>
-                    </div>
-                    <span className={`text-sm font-bold flex-shrink-0 tabular-nums ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
-                      {isIncome ? '+' : ''}{formatCurrency(e.amount, currency)}
-                    </span>
-                  </div>
-                );
-              })
+              selectedData.items.map((e) => (
+                <TransactionRow
+                  key={e.id}
+                  transaction={e}
+                  currency={currency}
+                  compact
+                  className="bg-white border border-gray-100 shadow-sm"
+                />
+              ))
             ) : (
               <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center px-4">
                 <div className="text-3xl mb-2">{isAfter(selectedDate, today) ? '🗓️' : '🌿'}</div>

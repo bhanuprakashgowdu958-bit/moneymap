@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getBudgets, setBudget, deleteBudget, getMonthlyStats } from '../lib/firestore';
+import { subscribeToBudgets, subscribeToExpenses, setBudget, deleteBudget } from '../lib/firestore';
 import { CATEGORIES, formatCurrency, getBudgetStatus } from '../lib/constants';
 import toast from 'react-hot-toast';
 
@@ -10,35 +10,51 @@ const currentYear  = now.getFullYear();
 
 export default function Budgets() {
   const { user, currency } = useAuth();
-  const [budgets,   setBudgets]   = useState([]);
+  const [rawBudgets, setRawBudgets] = useState([]);
+  const [allExpenses, setAllExpenses] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [showForm,  setShowForm]  = useState(false);
   const [saving,    setSaving]    = useState(false);
   const [form, setForm] = useState({ category: 'food-delivery', limit: '', alertAt: 80 });
 
-  const fetchBudgets = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const [bud, stats] = await Promise.all([
-        getBudgets(user.uid, currentMonth, currentYear),
-        getMonthlyStats(user.uid, currentMonth, currentYear),
-      ]);
-      const spendMap = {};
-      stats.stats.forEach((s) => { spendMap[s._id] = s.total; });
-      setBudgets(bud.map((b) => ({
-        ...b,
-        spent:      spendMap[b.category] || 0,
-        percentage: Math.round(((spendMap[b.category] || 0) / b.limit) * 100),
-      })));
-    } catch {
-      toast.error('Failed to load budgets');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    const unsubExpenses = subscribeToExpenses(
+      user.uid,
+      (items) => {
+        setAllExpenses(items);
+        setLoading(false);
+      },
+      () => {
+        toast.error('Failed to load budgets');
+        setLoading(false);
+      }
+    );
+    const unsubBudgets = subscribeToBudgets(user.uid, currentMonth, currentYear, setRawBudgets);
+    return () => {
+      unsubExpenses();
+      unsubBudgets();
+    };
+  }, [user?.uid]);
 
-  useEffect(() => { fetchBudgets(); }, [user]);
+  const budgets = useMemo(() => {
+    const spendMap = {};
+    allExpenses.forEach((e) => {
+      if (e.type === 'income') return;
+      const d = new Date(e.date);
+      if (d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear) {
+        spendMap[e.category] = (spendMap[e.category] || 0) + e.amount;
+      }
+    });
+    return rawBudgets.map((b) => {
+      const spent = spendMap[b.category] || 0;
+      return {
+        ...b,
+        spent,
+        percentage: Math.round((spent / (b.limit || 1)) * 100),
+      };
+    });
+  }, [allExpenses, rawBudgets]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -49,7 +65,6 @@ export default function Budgets() {
       toast.success('Budget saved! 🎯');
       setShowForm(false);
       setForm({ category: 'food-delivery', limit: '', alertAt: 80 });
-      fetchBudgets();
     } catch (err) {
       toast.error(err.message || 'Failed to save');
     } finally {
@@ -62,7 +77,6 @@ export default function Budgets() {
     try {
       await deleteBudget(user.uid, id);
       toast.success('Budget removed');
-      fetchBudgets();
     } catch {
       toast.error('Failed to delete');
     }

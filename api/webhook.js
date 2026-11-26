@@ -1,6 +1,6 @@
 // Vercel Serverless Function: Real-Time Phone SMS / UPI Webhook
 // Receives bank SMS or UPI notification text from the MoneyMap Android app or iOS Shortcuts,
-// classifies income (credits) vs expense (debits), extracts merchant/sender & category,
+// classifies income (credits) vs expense (debits), extracts counterparty name, account hint & category,
 // saves it to Cloud Firestore, and triggers budgetAlert for expenses when over threshold.
 
 import {
@@ -53,13 +53,18 @@ const CATEGORY_KEYWORDS = {
   education: ['coursera', 'udemy', 'unacademy', 'byju', 'school', 'college', 'tuition', 'books'],
 };
 
-function capitalizeWords(str) {
-  return str
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-}
+const INVALID_PARTY_EXACT = new Set([
+  'a/c', 'acct', 'account', 'card', 'upi', 'vpa', 'your', 'you', 'yours', 'yourself',
+  'my', 'me', 'myself', 'self', 'the', 'bank', 'user', 'customer', 'dear', 'rs', 'inr',
+  'rupees', 'money', 'payment', 'amount', 'google pay', 'gpay', 'phonepe', 'paytm',
+  'bhim', 'amazon pay', 'cred', 'whatsapp pay', 'messages', 'sms', 'alert', 'info',
+  'ref', 'reference', 'na', 'null', 'unknown', 'received', 'credited', 'debited',
+  'paid', 'sent', 'transferred', 'transaction', 'successful', 'money received',
+  'payment received', 'payment successful',
+]);
+
+const LEADING_NOTIFICATION_NOISE_RE =
+  /^(?:google\s+pay|gpay|phonepe|paytm|bhim|amazon\s+pay|cred|whatsapp\s+pay|money\s+received|payment\s+received|received\s+money|payment\s+successful|upi\s+alert|transaction\s+alert|alert|update|dear\s+(?:sbi\s+)?(?:customer|user))\b[\s:!\-,]*/i;
 
 const NOISE_REASON_PATTERNS = [
   { re: /\b(?:otp|one\s*time\s*password|verification\s*code|mpin|cvv)\b/i, reason: 'OTP / security message ignored' },
@@ -68,13 +73,173 @@ const NOISE_REASON_PATTERNS = [
 ];
 
 const STRONG_DEBIT_RE =
-  /\b(?:debited|withdrawn|spent|deducted|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+to\s+(?!you\b|your\b)|amt\s+sent)\b/i;
+  /\b(?:debited|withdrawn|spent|deducted|charged|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+to\s+(?!you\b|your\b)|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
-  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|money\s+received\b|payment\s+received\b|credited\s+(?:to\s+(?:your|a\/c|acct|x+\d+)|with|by|in|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
+  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
 
 const GENERIC_TXN_VERB_RE =
-  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|purchase|refund|cashback|salary)\b/i;
+  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|charged|purchase|refund|cashback|salary)\b/i;
+
+function formatPartyName(str) {
+  return str
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => {
+      const hasUpper = /[A-Z]/.test(w);
+      const hasLower = /[a-z]/.test(w);
+      if (hasUpper && hasLower) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+function stripLeadingNoise(raw) {
+  let out = String(raw || '').trim();
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(LEADING_NOTIFICATION_NOISE_RE, '').trim();
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+function cleanPartyCandidate(raw) {
+  if (!raw) return '';
+  let cleaned = stripLeadingNoise(raw)
+    .replace(/\b(?:via|using|through|on|in\s+your|in\s+a\/c|into|to\s+your|to\s+a\/c|ref(?:\s+no)?|upi\s+ref|utr|avl\.?\s*bal|bal(?:ance)?)\b.*$/i, '')
+    .replace(/\b(?:at|from|to)\s+(?=\d|your\b|a\/c\b|acct\b|account\b|vpa\b|upi\b).*$/i, '')
+    .replace(/^(?:mr|mrs|ms|miss|shri|dr)\.?\s+/i, '')
+    .replace(/[^\w\s&.'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^['.\-]+|['.\-]+$/g, '')
+    .trim();
+  return stripLeadingNoise(cleaned);
+}
+
+function isInvalidPartyName(candidate) {
+  if (!candidate) return true;
+  const trimmed = candidate.trim();
+  const lower = trimmed.toLowerCase();
+  if (trimmed.length < 2) return true;
+  if (/^[*xX\d\s\-/.+]+$/.test(trimmed)) return true;
+  if (/^(?:x+|\*+)\d{2,}$/i.test(trimmed)) return true;
+  if (/^[A-Z]{2}-[A-Z0-9]{3,10}$/i.test(trimmed)) return true;
+  if (INVALID_PARTY_EXACT.has(lower)) return true;
+  if (/\b(?:debited|credited|received|paid|sent|transferred|deposited|withdrawn|upi\s*ref|available|balance)\b/i.test(trimmed)) return true;
+  if (/[₹]/.test(trimmed)) return true;
+  return false;
+}
+
+function extractNameFromVpa(vpa) {
+  if (!vpa) return '';
+  const local = String(vpa).split('@')[0] || '';
+  if (!local || /^\d+$/.test(local)) return '';
+  const spaced = local
+    .replace(/[._-]+/g, ' ')
+    .replace(/\b\d{4,}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const cleaned = cleanPartyCandidate(spaced);
+  return isInvalidPartyName(cleaned) ? '' : formatPartyName(cleaned);
+}
+
+function matchPartyFromPatterns(text, patterns) {
+  for (const entry of patterns) {
+    const m = text.match(entry.re);
+    if (!m || !m[1]) continue;
+    const candidate = entry.isVpa ? extractNameFromVpa(m[1]) : cleanPartyCandidate(m[1]);
+    if (!isInvalidPartyName(candidate)) {
+      return formatPartyName(candidate);
+    }
+  }
+  return '';
+}
+
+const INCOME_SENDER_PATTERNS = [
+  // "Rahul Sharma paid ₹100 to you", "Leelu Bro has sent ₹1,000 to you"
+  {
+    re: /(?:^|[:\-!]\s*)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)\s+(?:has\s+)?(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:to\s+you|you)\b/i,
+  },
+  // "from VPA rahul99@okicici (Rahul Sharma)" -> prefer name inside parentheses
+  {
+    re: /\b(?:from|by)\s+(?:vpa\s+)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\s*\(\s*(?!upi\b|ref\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s*\)/i,
+  },
+  // "Received ₹100 from Rahul Sharma (rahul@okaxis)", "transfer from RAHUL SHARMA"
+  {
+    re: /\b(?:received(?:\s+(?:of\s+)?(?:rs\.?|inr|₹)\s*[0-9,.]+)?\s+from|transfer\s+from|transferred\s+from)\s+(?!(?:rs\.?|inr|vpa)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|\s+in\s+your|\s+in\s+a\/c|\s+to\s+your|\s+into|[,.;/]|$)/i,
+  },
+  // "credited by RAHUL", "deposited by RAHUL", "from RAHUL"
+  {
+    re: /\b(?:credited\s+(?:by|from)|deposited\s+by|from)\s+(?!(?:rs\.?|inr|vpa|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|\s+in\s+your|\s+in\s+a\/c|\s+to\s+your|\s+into|[,.;/]|$)/i,
+  },
+  // ICICI style: "Acct XX123 credited with Rs 100 on ...; RAHUL SHARMA credited."
+  {
+    re: /;\s*([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s+credited\b/i,
+  },
+  // Info: UPI/RAHUL SHARMA or Info- UPI/P2A/123456/RAHUL SHARMA
+  {
+    re: /\binfo\s*[:-]\s*(?:upi\/(?:(?:cr|dr|p2a|p2m)\/)?(?:\d+\/)?)?([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,
+  },
+  // Slash-delimited UPI narration: UPI/CR/123456/RAHUL SHARMA or UPI/123456/RAHUL SHARMA
+  {
+    re: /\bupi\/(?:(?:cr|dr|p2a|p2m)\/)?\d+\/([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,
+  },
+  // VPA handle fallback: "from VPA rahul.sharma@okicici" or "VPA: rahul@ybl"
+  {
+    re: /\b(?:from\s+(?:vpa\s+)?|vpa\s*[:/\s]\s*)([A-Za-z0-9._-]+@[A-Za-z0-9.-]+)/i,
+    isVpa: true,
+  },
+  {
+    re: /\bvpa\s*[:/]\s*([A-Za-z0-9&.'\- ]{2,25}?)(?:[/,.;(]|$)/i,
+  },
+];
+
+const EXPENSE_RECIPIENT_PATTERNS = [
+  {
+    re: /\bfv\.?\s*([A-Za-z0-9&.'\- ]{2,35}?)(?:,|\s+bal|\s+on|\(|$)/i,
+  },
+  // "to VPA rahul99@okicici (Rahul Sharma)" -> prefer name inside parentheses
+  {
+    re: /\b(?:to|towards)\s+(?:vpa\s+)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\s*\(\s*(?!upi\b|ref\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s*\)/i,
+  },
+  // "Paid ₹200 to Dhanush Capgemini", "transfer to PALLA GANESH", "towards Swiggy"
+  {
+    re: /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|towards|to|at)\s+(?!(?:you|your|yours|a\/c|acct|account|self|vpa|rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|[,.;/]|$)/i,
+  },
+  {
+    re: /\binfo\s*[:-]\s*(?:upi\/(?:(?:cr|dr|p2a|p2m)\/)?(?:\d+\/)?)?([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,
+  },
+  {
+    re: /\bupi\/(?:(?:cr|dr|p2a|p2m)\/)?\d+\/([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,
+  },
+  {
+    re: /\b(?:to\s+(?:vpa\s+)?|vpa\s*[:/\s]\s*|upi\s*[:/]\s*)([A-Za-z0-9._-]+@[A-Za-z0-9.-]+)/i,
+    isVpa: true,
+  },
+  {
+    re: /\b(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.'\- ]{2,25}?)(?:[/,.;(]|$)/i,
+  },
+];
+
+function extractPartyWithMeta(text, patterns, meta = {}) {
+  const body = String(meta.notificationText || '').replace(/\s+/g, ' ').trim();
+  const notifTitle = String(meta.notificationTitle || '').replace(/\s+/g, ' ').trim();
+
+  if (body) {
+    const fromBody = matchPartyFromPatterns(body, patterns);
+    if (fromBody) return fromBody;
+  }
+
+  if (notifTitle && !/[0-9₹]/.test(notifTitle)) {
+    const cleanedTitle = cleanPartyCandidate(notifTitle);
+    if (!isInvalidPartyName(cleanedTitle)) {
+      return formatPartyName(cleanedTitle);
+    }
+  }
+
+  return matchPartyFromPatterns(text, patterns);
+}
 
 function classifyTransaction(text) {
   for (const item of NOISE_REASON_PATTERNS) {
@@ -95,7 +260,7 @@ function classifyTransaction(text) {
   const hasDebitSignal = STRONG_DEBIT_RE.test(text);
 
   // If explicit credit signal is present without "your account debited", it's income.
-  if (hasIncomeSignal && !/\b(?:your\s+(?:a\/c|acct|account|card)\s+.*debited|debited\s+(?:from|by)\s+(?:your|a\/c|acct|[0-9,.]+))\b/i.test(text)) {
+  if (hasIncomeSignal && !/\b(?:your\s+(?:a\/c|acct|account|card)\s+.*debited|debited\s+(?:from|by)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|[0-9,.]+))\b/i.test(text)) {
     return { action: 'income' };
   }
 
@@ -106,51 +271,22 @@ function classifyTransaction(text) {
   return { action: 'ignore', reason: 'Non-transaction message ignored' };
 }
 
-function cleanPartyCandidate(raw) {
-  if (!raw) return '';
-  return raw
-    .replace(/\b(?:via|using|through|from|to|on|at)\b.*$/i, '')
-    .replace(/^(?:mr|mrs|ms|miss|shri)\.?\s+/i, '')
-    .replace(/[^\w\s&.-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isInvalidPartyName(candidate) {
-  const lower = (candidate || '').toLowerCase();
-  return (
-    !candidate ||
-    candidate.length < 2 ||
-    /^\d+$/.test(candidate) ||
-    ['a/c', 'acct', 'account', 'card', 'upi', 'your', 'you', 'my', 'the', 'bank', 'user', 'customer', 'dear', 'rs', 'inr', 'rupees'].includes(lower)
-  );
-}
-
-function extractIncomeDetails(text) {
-  const lower = text.toLowerCase();
-  let title = '';
-
-  const senderPatterns = [
-    // "Rahul Sharma paid ₹100 to you", "Rahul paid you ₹100", "Rahul sent ₹100 to you"
-    /(?:^|[:-]\s*)([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)\s+(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:to\s+you|you)\b/i,
-    // "Received ₹100 from Rahul", "transfer from RAHUL"
-    /\b(?:received(?:\s+(?:rs\.?|inr|₹)\s*[0-9,.]+)?\s+from|transfer\s+from|transferred\s+from)\s+([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\s+to\s+your|\s+into|\.|$)/i,
-    // "credited by RAHUL", "deposited by RAHUL", "from RAHUL"
-    /\b(?:credited\s+(?:by|from)|deposited\s+by|from)\s+(?!(?:rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.\- ]{1,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\s+to\s+your|\s+into|\.|$)/i,
-    /\binfo:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-    /\bvpa\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-  ];
-
-  for (const regex of senderPatterns) {
-    const m = text.match(regex);
-    if (m && m[1]) {
-      const candidate = cleanPartyCandidate(m[1]);
-      if (!isInvalidPartyName(candidate)) {
-        title = `From ${capitalizeWords(candidate)}`;
-        break;
-      }
-    }
+function extractAccountHint(text) {
+  const cardMatch = text.match(/\bcard(?:\s+ending)?(?:\s+with)?\s*(?:no\.?|xx+|x+|\*)?\s*(\d{4})\b/i);
+  if (cardMatch && cardMatch[1]) {
+    return `Card ••${cardMatch[1]}`;
   }
+  const acctMatch = text.match(/\b(?:a\/c|acct|account)(?:\s+no\.?)?(?:\s+ending)?\s*(?:xx+|x+|\*+)?(\d{4})\b/i);
+  if (acctMatch && acctMatch[1]) {
+    return `A/c ••${acctMatch[1]}`;
+  }
+  return '';
+}
+
+function extractIncomeDetails(text, meta = {}) {
+  const lower = text.toLowerCase();
+  const counterparty = extractPartyWithMeta(text, INCOME_SENDER_PATTERNS, meta);
+  let title = counterparty;
 
   let category = 'upi-received';
   if (/\b(?:salary|payroll|stipend|wages)\b/i.test(lower)) {
@@ -168,28 +304,12 @@ function extractIncomeDetails(text) {
       : 'Bank Credit';
   }
 
-  return { title, category };
+  return { title, counterparty, category };
 }
 
-function extractExpenseDetails(text) {
-  let title = 'Bank Debit Expense';
-  const merchantPatterns = [
-    /\bfv\.?\s*([A-Za-z0-9&.\- ]{2,30}?)(?:,|\s+bal|\s+on|$)/i,
-    /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|to|at)\s+(?!you\b|your\b)([A-Za-z0-9&.\- ]{2,30}?)(?:\s+on|\s+via|\s+ref|\s+using|\.|$)/i,
-    /\binfo:\s*(?:upi\/)?([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-    /\b(?:vpa|upi)\s*[:/]\s*([A-Za-z0-9&.\- ]{2,25}?)(?:\/|\.|$)/i,
-  ];
-
-  for (const regex of merchantPatterns) {
-    const m = text.match(regex);
-    if (m && m[1]) {
-      const candidate = cleanPartyCandidate(m[1]);
-      if (!isInvalidPartyName(candidate)) {
-        title = capitalizeWords(candidate);
-        break;
-      }
-    }
-  }
+function extractExpenseDetails(text, meta = {}) {
+  const counterparty = extractPartyWithMeta(text, EXPENSE_RECIPIENT_PATTERNS, meta);
+  let title = counterparty || 'Bank Debit Expense';
 
   const lower = `${text} ${title}`.toLowerCase();
   let category = 'other';
@@ -197,17 +317,21 @@ function extractExpenseDetails(text) {
     if (keywords.some((kw) => lower.includes(kw))) {
       if (title === 'Bank Debit Expense') {
         const matchedKw = keywords.find((kw) => lower.includes(kw));
-        if (matchedKw) title = capitalizeWords(matchedKw);
+        if (matchedKw) title = formatPartyName(matchedKw);
       }
       category = cat;
       break;
     }
   }
 
-  return { title, category };
+  return {
+    title,
+    counterparty: counterparty || (title !== 'Bank Debit Expense' ? title : ''),
+    category,
+  };
 }
 
-export function parseTransactionSms(rawText) {
+export function parseTransactionSms(rawText, meta = {}) {
   const text = String(rawText || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
 
@@ -236,18 +360,22 @@ export function parseTransactionSms(rawText) {
   if (!amount) return null;
 
   const isIncome = classification.action === 'income';
-  const details = isIncome ? extractIncomeDetails(text) : extractExpenseDetails(text);
+  const details = isIncome ? extractIncomeDetails(text, meta) : extractExpenseDetails(text, meta);
 
   const lower = text.toLowerCase();
   let paymentMethod = 'upi';
   if (lower.includes('card') || lower.includes('pos') || lower.includes('ending')) paymentMethod = 'card';
   else if (lower.includes('neft') || lower.includes('imps') || lower.includes('rtgs')) paymentMethod = 'netbanking';
 
+  const accountHint = extractAccountHint(text);
+
   return {
     ignored: false,
     type: isIncome ? 'income' : 'expense',
     amount,
     title: details.title,
+    counterparty: details.counterparty || '',
+    accountHint,
     category: details.category,
     paymentMethod,
     dateIso: new Date().toISOString(),
@@ -272,10 +400,19 @@ export default async function handler(req, res) {
   const uid = tokenCheck.uid;
 
   let smsText = '';
+  let notificationTitle = '';
+  let notificationText = '';
+  let sourcePackage = '';
   if (typeof req.body === 'string') {
     smsText = req.body;
   } else if (req.body && typeof req.body === 'object') {
     smsText = req.body.text || req.body.message || req.body.sms || req.body.body || '';
+    notificationTitle = req.body.notificationTitle || '';
+    notificationText = req.body.notificationText || '';
+    sourcePackage = req.body.sourcePackage || '';
+    if (!smsText && (notificationTitle || notificationText)) {
+      smsText = `${notificationTitle} ${notificationText}`.trim();
+    }
   }
 
   if (!smsText.trim()) {
@@ -283,7 +420,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const parsed = parseTransactionSms(smsText);
+    const parsed = parseTransactionSms(smsText, {
+      notificationTitle,
+      notificationText,
+      sourcePackage,
+    });
     if (!parsed) {
       return res.status(422).json({ error: 'Could not extract a valid transaction amount from text.' });
     }
@@ -300,6 +441,8 @@ export default async function handler(req, res) {
       fields: {
         type: { stringValue: parsed.type },
         title: { stringValue: parsed.title },
+        counterparty: { stringValue: parsed.counterparty || '' },
+        accountHint: { stringValue: parsed.accountHint || '' },
         amount: { doubleValue: Number(parsed.amount) },
         category: { stringValue: parsed.category },
         date: { timestampValue: parsed.dateIso },
@@ -349,6 +492,8 @@ export default async function handler(req, res) {
       expense: {
         type: parsed.type,
         title: parsed.title,
+        counterparty: parsed.counterparty,
+        accountHint: parsed.accountHint,
         amount: parsed.amount,
         category: parsed.category,
         paymentMethod: parsed.paymentMethod,
