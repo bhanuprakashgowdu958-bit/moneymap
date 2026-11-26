@@ -5,6 +5,12 @@
       "headers": [
         { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
       ]
+    },
+    {
+      "source": "/ota-bundle.zip",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, max-age=0" }
+      ]
     }
   ],
   "rewrites": [

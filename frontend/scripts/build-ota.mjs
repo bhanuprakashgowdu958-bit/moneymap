@@ -59,7 +59,7 @@ async function main() {
     version: meta.version,
     buildTime: meta.buildTime,
     minNativeVersion: meta.minNativeVersion,
-    url: `${baseUrl}/${BUNDLE_FILENAME}`,
+    url: `${baseUrl}/${BUNDLE_FILENAME}?v=${encodeURIComponent(meta.version)}`,
     checksum,
     apkUrl,
     notes: process.env.OTA_NOTES || 'Latest improvements and bug fixes are ready.',

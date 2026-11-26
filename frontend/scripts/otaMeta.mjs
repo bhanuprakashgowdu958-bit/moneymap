@@ -27,18 +27,6 @@ function collectFiles(targetPath, baseDir, out = []) {
 
 function readGitCommitTimestamp(frontendDir) {
   try {
-    const out = execSync(
-      'git log -1 --format=%ct -- src public index.html package.json vite.config.js tailwind.config.js',
-      { cwd: frontendDir, stdio: ['ignore', 'pipe', 'ignore'] },
-    )
-      .toString()
-      .trim();
-    const parsed = Number(out);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  } catch {
-    // Fallback if git history is unavailable
-  }
-  try {
     const out = execSync('git log -1 --format=%ct', {
       cwd: frontendDir,
       stdio: ['ignore', 'pipe', 'ignore'],

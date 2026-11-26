@@ -4,6 +4,8 @@ import { isNativeAndroid, LIVE_API_ORIGIN } from './nativeBridge';
 export const NATIVE_APP_SCHEMA = 6;
 export const OTA_READY_EVENT = 'moneymap:ota-ready';
 
+const inFlightDownloads = new Map();
+
 export function getCurrentWebVersion() {
   return import.meta.env.VITE_MONEYMAP_WEB_VERSION || '1.0.dev';
 }
@@ -26,11 +28,18 @@ export async function notifyOtaAppReady() {
   }
 }
 
+function buildCacheBustedBundleUrl(rawUrl, version) {
+  if (!rawUrl || !version) return rawUrl;
+  const sep = rawUrl.includes('?') ? '&' : '?';
+  return rawUrl.includes('v=') ? rawUrl : `${rawUrl}${sep}v=${encodeURIComponent(version)}`;
+}
+
 /**
- * Checks Vercel's ota-version.json and pre-downloads the web bundle in the
- * background if a newer compatible version exists.
+ * Fast manifest check (~300 bytes) against Vercel's ota-version.json.
+ * Returns { status: 'web' | 'up_to_date' | 'native_required' | 'ready', remote, currentVersion }
+ * without waiting for the full bundle zip download.
  */
-export async function checkAndPrepareOtaUpdate() {
+export async function checkOtaAvailability() {
   if (!isNativeAndroid()) {
     return { status: 'web', currentVersion: getCurrentWebVersion() };
   }
@@ -54,8 +63,8 @@ export async function checkAndPrepareOtaUpdate() {
     return { status: 'up_to_date', currentVersion };
   }
 
-  // Prevent downgrading if an APK was built from a newer commit than Vercel's current deploy
-  if (remote.buildTime && currentBuildTime && Number(remote.buildTime) < currentBuildTime) {
+  // Only skip if Vercel explicitly serves an older buildTime than this APK
+  if (remote.buildTime && currentBuildTime && Number(remote.buildTime) + 60 < currentBuildTime) {
     return { status: 'up_to_date', currentVersion };
   }
 
@@ -64,36 +73,58 @@ export async function checkAndPrepareOtaUpdate() {
     return { status: 'native_required', remote, currentVersion };
   }
 
-  // Reuse an already-downloaded bundle for this version if present
+  return { status: 'ready', remote, currentVersion, bundle: null };
+}
+
+/**
+ * Downloads (or reuses cached) OTA zip bundle for the given remote manifest.
+ * Deduplicates concurrent download requests for the same version.
+ */
+export async function downloadOtaBundle(remote) {
+  if (!isNativeAndroid() || !remote?.version || !remote?.url) return null;
+
   const existing = await CapacitorUpdater.list().catch(() => ({ bundles: [] }));
   const cachedBundle = (existing?.bundles || []).find(
     (b) => b.version === remote.version && (b.status === 'success' || b.status === 'pending')
   );
+  if (cachedBundle) return cachedBundle;
 
-  try {
-    const bundle =
-      cachedBundle ||
-      (await CapacitorUpdater.download({
-        url: remote.url,
-        version: remote.version,
-        checksum: remote.checksum,
-      }));
-
-    return {
-      status: 'ready',
-      bundle,
-      remote,
-      currentVersion,
-    };
-  } catch (err) {
-    console.warn('OTA bundle download failed, falling back to APK prompt:', err);
-    return { status: 'native_required', remote, currentVersion };
+  const key = remote.version;
+  if (inFlightDownloads.has(key)) {
+    return inFlightDownloads.get(key);
   }
+
+  const downloadPromise = CapacitorUpdater.download({
+    url: buildCacheBustedBundleUrl(remote.url, remote.version),
+    version: remote.version,
+    checksum: remote.checksum,
+  }).finally(() => {
+    inFlightDownloads.delete(key);
+  });
+
+  inFlightDownloads.set(key, downloadPromise);
+  return downloadPromise;
+}
+
+/**
+ * Checks Vercel's ota-version.json and prepares/downloads the web bundle if available.
+ */
+export async function checkAndPrepareOtaUpdate() {
+  const availability = await checkOtaAvailability();
+  if (availability.status !== 'ready') {
+    return availability;
+  }
+
+  const bundle = await downloadOtaBundle(availability.remote);
+  return {
+    ...availability,
+    bundle,
+  };
 }
 
 /**
  * Stages a downloaded bundle to activate automatically on the next
- * app background or restart without interrupting the user with a popup.
+ * app background or restart without interrupting the user.
  */
 export async function stageOtaForNextRestart(bundleId) {
   if (!isNativeAndroid() || !bundleId) return;

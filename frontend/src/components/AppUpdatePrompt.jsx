@@ -3,13 +3,14 @@ import toast from 'react-hot-toast';
 import { getNativeStatus, installNativeApkUpdate, isNativeAndroid } from '../lib/nativeBridge';
 import {
   applyOtaUpdate,
-  checkAndPrepareOtaUpdate,
+  checkOtaAvailability,
+  downloadOtaBundle,
   notifyOtaAppReady,
   OTA_READY_EVENT,
   stageOtaForNextRestart,
 } from '../lib/otaUpdater';
 
-const AUTO_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes between background update checks
+const RESUME_CHECK_COOLDOWN_MS = 60 * 1000; // 1 minute cooldown when switching apps
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours after tapping "Later"
 const LAST_CHECK_KEY = 'moneymap_ota_last_check';
 const DISMISSED_KEY = 'moneymap_ota_dismissed';
@@ -115,41 +116,52 @@ export default function AppUpdatePrompt() {
     // 1. Confirm current bundle booted cleanly BEFORE any network requests
     notifyOtaAppReady();
 
-    const runSilentCheck = async () => {
+    const runUpdateCheck = async (forceImmediate = false) => {
       const now = Date.now();
       const lastCheck = readLastCheckTime();
-      if (checkingRef.current || now - lastCheck < AUTO_CHECK_INTERVAL_MS) return;
+      if (checkingRef.current) return;
+      if (!forceImmediate && now - lastCheck < RESUME_CHECK_COOLDOWN_MS) return;
 
       checkingRef.current = true;
       try {
-        const result = await checkAndPrepareOtaUpdate();
+        const result = await checkOtaAvailability();
         saveLastCheckTime(now);
 
         if (result.status === 'ready' || result.status === 'native_required') {
           const remoteVer = result.remote?.version || '';
           const isForced = Boolean(result.remote?.forceUpdate);
 
-          if (result.status === 'ready' && result.bundle?.id) {
-            // Also stage for next restart in case the user taps "Later"
-            await stageOtaForNextRestart(result.bundle.id);
-          }
-
+          // Show the update prompt IMMEDIATELY without waiting for the zip download
           if (isForced || !isSnoozed(remoteVer)) {
             setUpdateInfo(result);
           }
+
+          // Pre-download OTA zip quietly in the background so "Update Now" is instant
+          if (result.status === 'ready' && result.remote) {
+            downloadOtaBundle(result.remote)
+              .then((bundle) => {
+                if (bundle?.id) {
+                  setUpdateInfo((prev) =>
+                    prev && prev.remote?.version === remoteVer ? { ...prev, bundle } : prev
+                  );
+                  return stageOtaForNextRestart(bundle.id);
+                }
+              })
+              .catch(() => {});
+          }
         }
       } catch {
-        // Silent fail for automatic background checks (offline/poor network)
+        // Silent fail for automatic checks (offline/poor network)
       } finally {
         checkingRef.current = false;
       }
     };
 
-    // Check quietly on startup (respecting the 4-hour interval)
-    runSilentCheck();
+    // Always check immediately when the user opens the app
+    runUpdateCheck(true);
 
     // Auto-resume APK install if returning from "Allow unknown apps" settings,
-    // otherwise check quietly only when the 4-hour interval has elapsed.
+    // otherwise check again if returning after RESUME_CHECK_COOLDOWN_MS.
     const handleVisibility = async () => {
       if (document.visibilityState !== 'visible') return;
 
@@ -166,7 +178,7 @@ export default function AppUpdatePrompt() {
         }
       }
 
-      runSilentCheck();
+      runUpdateCheck(false);
     };
 
     // Allow manual "Check for Updates" from Settings to show the prompt immediately
@@ -206,10 +218,16 @@ export default function AppUpdatePrompt() {
   };
 
   const handleApplyOta = async () => {
-    if (updateInfo.status !== 'ready' || !updateInfo.bundle?.id) return;
+    if (updateInfo.status !== 'ready' || !updateInfo.remote) return;
     setApplying(true);
     try {
-      await applyOtaUpdate(updateInfo.bundle.id);
+      const bundle = updateInfo.bundle?.id
+        ? updateInfo.bundle
+        : await downloadOtaBundle(updateInfo.remote);
+      if (!bundle?.id) {
+        throw new Error('Update package could not be prepared.');
+      }
+      await applyOtaUpdate(bundle.id);
     } catch (err) {
       setApplying(false);
       toast.error(err?.message || 'Could not apply update. Please try again.');
