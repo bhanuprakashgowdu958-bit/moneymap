@@ -71,7 +71,7 @@ const STRONG_INCOME_RE =
   /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|\b(?:salary|freelance|income)\b|(?:cashback|refund|dividend|reimbursement)\s+(?:of\s+)?(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:credited|received|deposited|processed|issued)|(?:credited|received|deposited)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*\s*(?:as\s+)?(?:cashback|refund|salary|dividend|reimbursement))\b/i;
 
 const DEBIT_ACCOUNT_RE =
-  /\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+))\b/i;
+  /\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|ac\.?|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|ac\.?|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+)|(?:rs\.?|inr|₹)\s*[0-9,.]+))\b/i;
 
 function cleanText(text) {
   return text.replace(/\s+/g, ' ').trim();

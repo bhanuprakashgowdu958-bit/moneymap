@@ -4,6 +4,7 @@ import { Settings as SettingsIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
 import { isNativeAndroid, syncNativeConfig } from '../lib/nativeBridge';
+import AutoTrackSetupPrompt from './AutoTrackSetupPrompt';
 
 const navItems = [
   { to: '/dashboard', icon: '📊', label: 'Home' },
@@ -204,6 +205,7 @@ export default function Layout({ children }) {
           onFocusCapture={handleFocusIn}
           className={`flex-1 overflow-y-auto px-3.5 py-4 sm:p-6 lg:p-8 ${keyboardOpen ? 'pb-6' : 'pb-28'} lg:pb-8 page-enter max-w-7xl mx-auto w-full`}
         >
+          <AutoTrackSetupPrompt />
           {children}
         </div>
       </main>

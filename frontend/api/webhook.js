@@ -71,18 +71,25 @@ const INVALID_PARTY_EXACT = new Set([
 const LEADING_NOTIFICATION_NOISE_RE =
   /^(?:google\s+pay|gpay|phonepe|paytm|bhim|amazon\s+pay|cred|whatsapp\s+pay|money\s+received|payment\s+received|received\s+money|payment\s+successful|upi\s+alert|transaction\s+alert|alert|update|dear\s+(?:sbi\s+)?(?:customer|user))\b[\s:!\-,]*/i;
 
-const NOISE_REASON_PATTERNS = [
-  { re: /\b(?:otp|one\s*time\s*password|verification\s*code|mpin|cvv)\b/i, reason: 'OTP / security message ignored' },
+const HARD_NOISE_REASON_PATTERNS = [
+  { re: /\b(?:is\s+your\s+otp|otp\s+(?:is|for)|use\s+otp|enter\s+otp|one\s*time\s*password|verification\s*code)\b/i, reason: 'OTP / security message ignored' },
   { re: /\b(?:requested\s+(?:rs|inr|₹|money)|payment\s+request|has\s+requested|collect\s+request|approve\s+to\s+pay|mandate\s+(?:created|approved)|autopay\s+(?:created|registered)|bill\s+due|minimum\s+due|pre-?approved\s+loan)\b/i, reason: 'Payment request / reminder ignored' },
-  { re: /\b(?:failed|declined|unsuccessful|could\s+not\s+be\s+processed|cancelled|canceled|reversed\s+failure)\b/i, reason: 'Failed or declined transaction ignored' },
+  { re: /\b(?:transaction\s+failed|payment\s+failed|failed|declined|unsuccessful|could\s+not\s+be\s+processed|cancelled|canceled|reversed\s+failure|will\s+be\s+credited|to\s+be\s+credited)\b/i, reason: 'Failed or declined transaction ignored' },
+];
+
+const PROMO_NOISE_PATTERNS = [
+  { re: /\b(?:otp|mpin|cvv)\b/i, reason: 'OTP / security message ignored' },
   {
     re: /\b(?:get|win|earn|avail|enjoy|unlock|grab|claim(?:\s+your|\s+now)?|chance\s+to\s+win|assured\s+(?:cashback|reward)|up\s*to\s+(?:rs\.?|inr|₹)|upto\s+(?:rs\.?|inr|₹)|flat\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s*(?:off|cashback|discount)|scratch\s+card|voucher|coupon|promo(?:\s*code)?|use\s+code|apply\s+code|valid\s+(?:till|until)|limited\s+period|t&c\s+apply|terms\s+apply|congratulations|you(?:'ve|\s+have)\s+won|lucky\s+draw|pre-?approved|loan\s+offer|credit\s+limit|upgrade\s+your\s+card|apply\s+now|shop\s+(?:for|worth)|min(?:imum)?\s+(?:spend|order)|cashback\s+offer|special\s+offer)\b/i,
     reason: 'Promotional / offer message ignored',
   },
 ];
 
+const CONFIRMED_TXN_RE =
+  /\b(?:(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\b.*\b(?:a\/c|ac\.?|acct|account|card|upi|vpa|mob\s*bk|neft|imps|rtgs|trf|ref|rs\.?|inr|₹)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+(?:to|via)|received\s+(?:rs\.?|inr|₹)?\s*[0-9,]+(?:\.[0-9]{1,2})?\s+from)\b/i;
+
 const STRONG_DEBIT_RE =
-  /\b(?:debited|debit\s+(?:of|from|in)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+to\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
+  /\b(?:debited|debit\s+(?:of|from|in|for)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|transfer\s+(?:of|to|from)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+(?:to|via)\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
   /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|(?:cashback|refund|salary|dividend|reimbursement)\s+(?:of\s+)?(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:credited|received|deposited|processed|issued)|(?:credited|received|deposited)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*\s*(?:as\s+)?(?:cashback|refund|salary|dividend|reimbursement))\b/i;
@@ -254,9 +261,18 @@ function extractPartyWithMeta(text, patterns, meta = {}) {
 }
 
 function classifyTransaction(text) {
-  for (const item of NOISE_REASON_PATTERNS) {
+  for (const item of HARD_NOISE_REASON_PATTERNS) {
     if (item.re.test(text)) {
       return { action: 'ignore', reason: item.reason };
+    }
+  }
+
+  const isConfirmedTxn = CONFIRMED_TXN_RE.test(text);
+  if (!isConfirmedTxn) {
+    for (const item of PROMO_NOISE_PATTERNS) {
+      if (item.re.test(text)) {
+        return { action: 'ignore', reason: item.reason };
+      }
     }
   }
 
@@ -274,7 +290,7 @@ function classifyTransaction(text) {
   // If explicit credit signal is present without account debit, it's income.
   if (
     hasIncomeSignal &&
-    !/\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+))\b/i.test(text)
+    !/\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|ac\.?|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|ac\.?|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+)|(?:rs\.?|inr|₹)\s*[0-9,.]+))\b/i.test(text)
   ) {
     return { action: 'income' };
   }

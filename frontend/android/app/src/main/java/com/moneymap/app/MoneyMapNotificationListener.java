@@ -2,6 +2,7 @@ package com.moneymap.app;
 
 import android.app.Notification;
 import android.os.Bundle;
+import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 
@@ -20,7 +21,13 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
         "com.dreamplug.androidapp",               // CRED
         "com.google.android.apps.messaging",      // Google Messages
         "com.samsung.android.messaging",          // Samsung Messages
-        "com.android.mms"                         // Default SMS
+        "com.android.mms",                        // Default SMS
+        "com.oplus.mms",                          // OnePlus / Oppo / Realme Messages
+        "com.coloros.mms",                        // ColorOS / RealmeUI Messages
+        "com.oneplus.mms",                        // OnePlus Messages
+        "com.xiaomi.mms",                         // Xiaomi Messages
+        "com.miui.mms",                           // MIUI Messages
+        "com.truecaller"                          // Truecaller SMS
     ));
 
     @Override
@@ -44,7 +51,33 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
         if (text.isEmpty()) {
             text = charSeqToString(extras.getCharSequence(Notification.EXTRA_TEXT));
         }
+        String subText = charSeqToString(extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
+        if (!subText.isEmpty() && !text.contains(subText)) {
+            text = (text + " " + subText).trim();
+        }
         String combined = (title + " " + text).trim();
+
+        // Check MessagingStyle bundle array (used by Google Messages & grouped SMS alerts)
+        if (!MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) {
+            Parcelable[] msgs = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+            if (msgs != null && msgs.length > 0) {
+                for (int i = msgs.length - 1; i >= 0; i--) {
+                    if (!(msgs[i] instanceof Bundle)) continue;
+                    Bundle msgBundle = (Bundle) msgs[i];
+                    String msgBody = charSeqToString(msgBundle.getCharSequence("text"));
+                    String msgSender = charSeqToString(msgBundle.getCharSequence("sender"));
+                    String msgCombined = (msgSender + " " + msgBody).trim();
+                    if (MoneyMapExpenseWebhook.looksLikeDebitExpense(msgCombined)) {
+                        title = msgSender;
+                        text = msgBody;
+                        combined = msgCombined;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Check InboxStyle line arrays if still not matched (newest may be last or first)
         if (!MoneyMapExpenseWebhook.looksLikeDebitExpense(combined)) {
             CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
             if (lines != null && lines.length > 0) {

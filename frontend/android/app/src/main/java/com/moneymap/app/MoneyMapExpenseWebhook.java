@@ -42,7 +42,7 @@ public final class MoneyMapExpenseWebhook {
     }
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|debit\\s+(?:of|from|in)|paid\\s+(?:to|for|at|by|via|rs|inr|₹|[0-9])|payment\\s+(?:of\\s+)?(?:rs|inr|₹|[0-9])|sent\\s+(?:to|rs|inr|₹|[0-9])|transferred(?:\\s+(?:to|from))?|trf\\s+to|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s*(?:from|by|to|rs|inr|₹)|[0-9]\\s*dr\\.?\\b|you\\s+(?:have\\s+)?(?:paid|sent|transferred))",
+        "(?:debited|debit\\s+(?:of|from|in|for)|paid\\s+(?:to|for|at|by|via|rs|inr|₹|[0-9])|payment\\s+(?:of\\s+)?(?:rs|inr|₹|[0-9])|sent\\s+(?:to|via|rs|inr|₹|[0-9])|transferred(?:\\s+(?:to|from))?|transfer\\s+(?:of|to|from)|trf\\s+to|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s*(?:from|by|to|for|in|of|at|rs|inr|₹)|[0-9]\\s*dr\\.?\\b|you\\s+(?:have\\s+)?(?:paid|sent|transferred))",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -52,12 +52,22 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern GENERIC_BANK_SIGNAL = Pattern.compile(
-        "(?:upi|vpa|a/c|acct|account|bbps)",
+        "(?:upi|vpa|a/c|acct|account|\\bac\\.?\\b|bbps|mob\\s*bk)",
         Pattern.CASE_INSENSITIVE
     );
 
-    private static final Pattern IGNORE_SIGNAL = Pattern.compile(
-        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|pre-?approved|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled|get\\s+(?:rs|inr|₹|up\\s*to|flat)|win\\s+(?:rs|inr|₹|up\\s*to)|earn\\s+(?:rs|inr|₹|up\\s*to)|avail\\s+(?:rs|inr|₹|up\\s*to)|unlock\\s+(?:rs|inr|₹)|claim\\s+(?:your|now)|chance\\s+to\\s+win|assured\\s+(?:cashback|reward)|up\\s*to\\s+(?:rs\\.?|inr|₹)|upto\\s+(?:rs\\.?|inr|₹)|flat\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,.]+\\s*(?:off|cashback|discount)|scratch\\s+card|voucher|coupon|promo(?:\\s*code)?|use\\s+code|apply\\s+code|valid\\s+(?:till|until)|limited\\s+period|t&c\\s+apply|terms\\s+apply|congratulations|you(?:'ve|\\s+have)\\s+won|lucky\\s+draw|loan\\s+offer|credit\\s+limit|upgrade\\s+your\\s+card|apply\\s+now|shop\\s+(?:for|worth)|min(?:imum)?\\s+(?:spend|order)|cashback\\s+offer|special\\s+offer)\\b",
+    private static final Pattern CONFIRMED_TXN_SIGNAL = Pattern.compile(
+        "(?:\\b(?:debited|credited|deposited|withdrawn|deducted|charged|spent)\\b.*\\b(?:a/c|\\bac\\.?\\b|acct|account|card|upi|vpa|mob\\s*bk|neft|imps|rtgs|trf|ref|rs\\.?|inr|₹)|\\b(?:paid|sent|transferred)\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+(?:to|via)\\b|\\breceived\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+from\\b)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern HARD_IGNORE_SIGNAL = Pattern.compile(
+        "\\b(?:is\\s+your\\s+otp|otp\\s+(?:is|for)|use\\s+otp|enter\\s+otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled|will\\s+be\\s+credited|to\\s+be\\s+credited)\\b",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern PROMO_SIGNAL = Pattern.compile(
+        "\\b(?:otp|mpin|cvv|pre-?approved|get\\s+(?:rs|inr|₹|up\\s*to|flat)|win\\s+(?:rs|inr|₹|up\\s*to)|earn\\s+(?:rs|inr|₹|up\\s*to)|avail\\s+(?:rs|inr|₹|up\\s*to)|unlock\\s+(?:rs|inr|₹)|claim\\s+(?:your|now)|chance\\s+to\\s+win|assured\\s+(?:cashback|reward)|up\\s*to\\s+(?:rs\\.?|inr|₹)|upto\\s+(?:rs\\.?|inr|₹)|flat\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,.]+\\s*(?:off|cashback|discount)|scratch\\s+card|voucher|coupon|promo(?:\\s*code)?|use\\s+code|apply\\s+code|valid\\s+(?:till|until)|limited\\s+period|t&c\\s+apply|terms\\s+apply|congratulations|you(?:'ve|\\s+have)\\s+won|lucky\\s+draw|loan\\s+offer|credit\\s+limit|upgrade\\s+your\\s+card|apply\\s+now|shop\\s+(?:for|worth)|min(?:imum)?\\s+(?:spend|order)|cashback\\s+offer|special\\s+offer)\\b",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -86,7 +96,10 @@ public final class MoneyMapExpenseWebhook {
 
     public static boolean looksLikeDebitExpense(String text) {
         if (text == null || text.trim().length() < 6) return false;
-        if (IGNORE_SIGNAL.matcher(text).find()) return false;
+        if (HARD_IGNORE_SIGNAL.matcher(text).find()) return false;
+        if (PROMO_SIGNAL.matcher(text).find() && !CONFIRMED_TXN_SIGNAL.matcher(text).find()) {
+            return false;
+        }
         boolean hasSignal = DEBIT_SIGNAL.matcher(text).find()
             || CREDIT_SIGNAL.matcher(text).find()
             || GENERIC_BANK_SIGNAL.matcher(text).find();
