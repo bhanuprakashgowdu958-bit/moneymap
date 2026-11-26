@@ -57,7 +57,7 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern GENERIC_BANK_SIGNAL = Pattern.compile(
-        "(?:upi|vpa|a/c|acct|account|\\bac\\.?\\b|bbps|mob\\s*bk)",
+        "(?:upi|vpa|a/c|acct|account|\\bac\\.?\\b|bbps|mob\\s*bk|self\\s+transfer)",
         Pattern.CASE_INSENSITIVE
     );
 

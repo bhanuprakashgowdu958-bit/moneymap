@@ -27,7 +27,7 @@ public class MoneyMapAccessibilityService extends AccessibilityService {
     ));
 
     private static final Pattern COMPLETED_PAYMENT_RE = Pattern.compile(
-        "(?:\\b(?:transaction\\s+successful|payment\\s+successful|paid\\s+successfully|sent\\s+successfully|money\\s+sent|transfer\\s+successful|payment\\s+completed)\\b|(?:\\b(?:paid\\s+to|sent\\s+to|paid\\s+(?:rs\\.?|inr|₹))\\b.*\\b(?:utr|transaction\\s+id|upi\\s+ref|debited\\s+from|done|share\\s+receipt)\\b))",
+        "(?:\\b(?:transaction\\s+successful|payment\\s+successful|transferred\\s+successfully|paid\\s+successfully|sent\\s+successfully|money\\s+sent|transfer\\s+successful|payment\\s+completed)\\b|\\bdebited\\s+from\\b.*\\bcredited\\s+to\\b|(?:\\b(?:paid\\s+to|sent\\s+to|self\\s+transfer|paid\\s+(?:rs\\.?|inr|₹))\\b.*\\b(?:utr|transaction\\s+id|upi\\s+ref|debited\\s+from|credited\\s+to|done|share\\s+receipt)\\b))",
         Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
 

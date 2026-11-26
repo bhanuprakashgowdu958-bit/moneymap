@@ -440,6 +440,86 @@ export function parseTransactionSms(rawText, meta = {}) {
   };
 }
 
+const UPI_APP_PACKAGES = new Set([
+  'com.phonepe.app',
+  'com.google.android.apps.nbu.paisa.user',
+  'net.one97.paytm',
+  'in.org.npci.upiapp',
+  'in.amazon.mShop.android.shopping',
+  'com.dreamplug.androidapp',
+]);
+
+function extractTransferSideHint(segment) {
+  if (!segment) return '';
+  const digitsMatch = segment.match(/(?:[xX*•]+|no\.?\s*|-)?\s*(\d{4})\b/);
+  if (digitsMatch && digitsMatch[1]) {
+    return `A/c ••${digitsMatch[1]}`;
+  }
+  const cleanedBank = segment
+    .replace(/\b(?:bank\s+of\s+india|of\s+india)\b/gi, '')
+    .replace(/[^A-Za-z0-9\s&.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleanedBank.length >= 2 && cleanedBank.length <= 28) {
+    return formatPartyName(cleanedBank);
+  }
+  return '';
+}
+
+/**
+ * When a confirmation screen represents a Self-Transfer between the user's own
+ * primary and secondary bank accounts, returns both the debit (expense) leg
+ * and credit (income) leg so both accounts stay accurate even without SMS alerts.
+ */
+export function buildSelfTransferLegs(rawText, parsed, meta = {}) {
+  if (!parsed || parsed.ignored || !parsed.amount) return null;
+  const text = String(rawText || '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+
+  const pkg = String(meta.sourcePackage || '').toLowerCase();
+  const isExplicitSelf = /\b(?:self\s+transfer|to\s+self|own\s+account|transferred\s+to\s+self)\b/i.test(text);
+  const hasBothDirections = /\bdebited\s+from\b/i.test(text) && /\bcredited\s+to\b/i.test(text);
+  if (!isExplicitSelf && !(UPI_APP_PACKAGES.has(pkg) && hasBothDirections)) {
+    return null;
+  }
+
+  const debitedSeg = text.match(
+    /\bdebited\s+from\s+(.{2,45}?)(?=\b(?:credited\s+to|utr|upi\s+ref|transaction\s+id|transfer\s+details|done|share|check\s+balance)\b|$)/i
+  )?.[1];
+  const creditedSeg = text.match(
+    /\bcredited\s+to\s+(.{2,45}?)(?=\b(?:debited\s+from|utr|upi\s+ref|transaction\s+id|transfer\s+details|done|share|check\s+balance)\b|$)/i
+  )?.[1];
+
+  const fromHint = extractTransferSideHint(debitedSeg) || parsed.accountHint || 'Primary Account';
+  const toHint = extractTransferSideHint(creditedSeg) || 'Secondary Account';
+
+  const debitLeg = {
+    ignored: false,
+    type: 'expense',
+    amount: parsed.amount,
+    title: `Self Transfer (${toHint})`,
+    counterparty: `Self Transfer (${toHint})`,
+    accountHint: fromHint === 'Primary Account' ? '' : fromHint,
+    category: 'other',
+    paymentMethod: parsed.paymentMethod || 'upi',
+    dateIso: parsed.dateIso,
+  };
+
+  const creditLeg = {
+    ignored: false,
+    type: 'income',
+    amount: parsed.amount,
+    title: `Self Transfer (${fromHint})`,
+    counterparty: `Self Transfer (${fromHint})`,
+    accountHint: toHint === 'Secondary Account' ? '' : toHint,
+    category: 'upi-received',
+    paymentMethod: parsed.paymentMethod || 'upi',
+    dateIso: parsed.dateIso,
+  };
+
+  return [debitLeg, creditLeg];
+}
+
 const GENERIC_PARTY_NAMES = new Set([
   '',
   'bank credit',
@@ -543,6 +623,58 @@ async function findAndMergeDuplicateTransaction(uid, parsed, nowIso) {
   return { duplicate: false };
 }
 
+async function persistTransactionLeg(uid, leg, nowIso) {
+  const dedupeCheck = await findAndMergeDuplicateTransaction(uid, leg, nowIso);
+  if (dedupeCheck.duplicate) {
+    return {
+      saved: false,
+      deduplicated: true,
+      merged: Boolean(dedupeCheck.merged),
+      reason: dedupeCheck.merged
+        ? 'Merged duplicate SMS/UPI alert into existing transaction'
+        : 'Duplicate transaction within 3 minutes ignored',
+    };
+  }
+
+  const noteText = leg.type === 'income'
+    ? '💰 Auto-logged Income via Phone SMS / UPI'
+    : '📱 Auto-logged Expense via Phone SMS / UPI';
+
+  const firestorePayload = {
+    fields: {
+      type: { stringValue: leg.type },
+      title: { stringValue: leg.title },
+      counterparty: { stringValue: leg.counterparty || '' },
+      accountHint: { stringValue: leg.accountHint || '' },
+      amount: { doubleValue: Number(leg.amount) },
+      category: { stringValue: leg.category },
+      date: { timestampValue: leg.dateIso },
+      paymentMethod: { stringValue: leg.paymentMethod },
+      note: { stringValue: noteText },
+      isRecurring: { booleanValue: false },
+      source: { stringValue: 'webhook' },
+      createdAt: { timestampValue: nowIso },
+      updatedAt: { timestampValue: nowIso },
+    },
+  };
+
+  const writeRes = await fetch(
+    `${FIRESTORE_BASE}/users/${encodeURIComponent(uid)}/expenses?key=${FIREBASE_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(firestorePayload),
+    }
+  );
+
+  if (!writeRes.ok) {
+    const errBody = await writeRes.text();
+    throw new Error(errBody || 'Failed to save transaction to Firestore.');
+  }
+
+  return { saved: true, deduplicated: false, merged: false };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -597,64 +729,43 @@ export default async function handler(req, res) {
     }
 
     const nowIso = new Date().toISOString();
-    const dedupeCheck = await findAndMergeDuplicateTransaction(uid, parsed, nowIso);
-    if (dedupeCheck.duplicate) {
+    const selfLegs = buildSelfTransferLegs(smsText, parsed, {
+      notificationTitle,
+      notificationText,
+      sourcePackage,
+    });
+    const legsToProcess = selfLegs || [parsed];
+
+    let savedCount = 0;
+    let mergedAny = false;
+    let lastReason = '';
+    for (const leg of legsToProcess) {
+      const outcome = await persistTransactionLeg(uid, leg, nowIso);
+      if (outcome.saved) savedCount++;
+      if (outcome.merged) mergedAny = true;
+      if (outcome.reason) lastReason = outcome.reason;
+    }
+
+    if (savedCount === 0) {
       return res.status(200).json({
         success: true,
         ignored: true,
         deduplicated: true,
-        merged: Boolean(dedupeCheck.merged),
-        reason: dedupeCheck.merged
-          ? 'Merged duplicate SMS/UPI alert into existing transaction'
-          : 'Duplicate transaction within 3 minutes ignored',
+        merged: mergedAny,
+        reason: lastReason || 'Duplicate transaction within 3 minutes ignored',
       });
-    }
-
-    const noteText = parsed.type === 'income'
-      ? '💰 Auto-logged Income via Phone SMS / UPI'
-      : '📱 Auto-logged Expense via Phone SMS / UPI';
-
-    const firestorePayload = {
-      fields: {
-        type: { stringValue: parsed.type },
-        title: { stringValue: parsed.title },
-        counterparty: { stringValue: parsed.counterparty || '' },
-        accountHint: { stringValue: parsed.accountHint || '' },
-        amount: { doubleValue: Number(parsed.amount) },
-        category: { stringValue: parsed.category },
-        date: { timestampValue: parsed.dateIso },
-        paymentMethod: { stringValue: parsed.paymentMethod },
-        note: { stringValue: noteText },
-        isRecurring: { booleanValue: false },
-        source: { stringValue: 'webhook' },
-        createdAt: { timestampValue: nowIso },
-        updatedAt: { timestampValue: nowIso },
-      },
-    };
-
-    const writeRes = await fetch(
-      `${FIRESTORE_BASE}/users/${encodeURIComponent(uid)}/expenses?key=${FIREBASE_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(firestorePayload),
-      }
-    );
-
-    if (!writeRes.ok) {
-      const errBody = await writeRes.text();
-      return res.status(500).json({ error: 'Failed to save transaction to Firestore.', details: errBody });
     }
 
     // Only check category spending budgets for expenses (never for incoming credits)
     let budget = null;
-    if (parsed.type === 'expense') {
+    const primaryExpense = legsToProcess.find((l) => l.type === 'expense');
+    if (primaryExpense) {
       try {
         const now = new Date();
         const currency = await getUserCurrency(uid);
         budget = await evaluateCategoryBudget(
           uid,
-          parsed.category,
+          primaryExpense.category,
           now.getMonth() + 1,
           now.getFullYear(),
           currency
@@ -664,16 +775,18 @@ export default async function handler(req, res) {
       }
     }
 
+    const summaryLeg = legsToProcess[0];
     return res.status(200).json({
       success: true,
+      legsSaved: savedCount,
       expense: {
-        type: parsed.type,
-        title: parsed.title,
-        counterparty: parsed.counterparty,
-        accountHint: parsed.accountHint,
-        amount: parsed.amount,
-        category: parsed.category,
-        paymentMethod: parsed.paymentMethod,
+        type: summaryLeg.type,
+        title: summaryLeg.title,
+        counterparty: summaryLeg.counterparty,
+        accountHint: summaryLeg.accountHint,
+        amount: summaryLeg.amount,
+        category: summaryLeg.category,
+        paymentMethod: summaryLeg.paymentMethod,
       },
       budget,
       budgetAlert: budget?.shouldAlert ? budget.message : null,
