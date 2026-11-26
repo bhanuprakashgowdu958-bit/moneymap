@@ -40,15 +40,20 @@ const CATEGORY_KEYWORDS = {
   ],
   subscriptions: [
     'netflix', 'spotify', 'prime', 'youtube premium', 'apple', 'google one', 'gym',
-    'cult.fit', 'cultfit', 'subscription', 'membership', 'cloud',
+    'cult.fit', 'cultfit', 'jio', 'airtel', 'vodafone', 'vi prepaid', 'vi postpaid',
+    'vi recharge', 'bsnl', 'tata play', 'tatasky', 'dish tv', 'sun direct', 'd2h',
+    'dth', 'recharge', 'recharged', 'prepaid', 'postpaid', 'subscription', 'membership', 'cloud',
   ],
   'health-wellness': [
     'apollo', 'pharmeasy', '1mg', 'netmeds', 'medplus', 'pharmacy', 'chemist',
     'hospital', 'clinic', 'doctor', 'diagnostic', 'lenskart', 'dentist',
   ],
   housing: [
-    'rent', 'maintenance', 'electricity', 'bescom', 'tata power', 'adani power', 'water bill',
-    'piped gas', 'indane', 'hp gas', 'bharat gas', 'wifi', 'broadband', 'act fibernet',
+    'bescom', 'tata power', 'adani power', 'tsspdcl', 'apspdcl', 'msedcl', 'mseb', 'bses',
+    'tneb', 'kseb', 'uppcl', 'cesc', 'nbpdcl', 'sbpdcl', 'dgvcl', 'mgvcl', 'ugvcl', 'pgvcl',
+    'torrent power', 'electricity', 'power bill', 'powerbill', 'eb bill', 'light bill',
+    'water bill', 'piped gas', 'indane', 'hp gas', 'bharat gas', 'wifi', 'broadband',
+    'act fibernet', 'bbps', 'bharat billpay', 'billdesk', 'rent', 'maintenance',
   ],
   education: ['coursera', 'udemy', 'unacademy', 'byju', 'school', 'college', 'tuition', 'books'],
 };
@@ -73,13 +78,13 @@ const NOISE_REASON_PATTERNS = [
 ];
 
 const STRONG_DEBIT_RE =
-  /\b(?:debited|withdrawn|spent|deducted|charged|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+to\s+(?!you\b|your\b)|amt\s+sent)\b/i;
+  /\b(?:debited|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s+(?:rs|inr|₹)|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+(?:\s+to\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
   /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
 
 const GENERIC_TXN_VERB_RE =
-  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|charged|purchase|refund|cashback|salary)\b/i;
+  /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|deducted|charged|recharged?|bill\s+payment|purchase|refund|cashback|salary)\b/i;
 
 function formatPartyName(str) {
   return str
@@ -203,9 +208,12 @@ const EXPENSE_RECIPIENT_PATTERNS = [
   {
     re: /\b(?:to|towards)\s+(?:vpa\s+)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\s*\(\s*(?!upi\b|ref\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s*\)/i,
   },
-  // "Paid ₹200 to Dhanush Capgemini", "transfer to PALLA GANESH", "towards Swiggy"
+  // "Paid ₹200 to Dhanush Capgemini", "transfer to PALLA GANESH", "towards Swiggy", "bill payment ... for BESCOM"
   {
     re: /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|towards|to|at)\s+(?!(?:you|your|yours|a\/c|acct|account|self|vpa|rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|[,.;/]|$)/i,
+  },
+  {
+    re: /\b(?:bill\s+(?:paid|payment)|recharged?)\b.*?\bfor\s+(?!(?:rs\.?|inr|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+successful|\s+completed|[,.;/]|$)/i,
   },
   {
     re: /\binfo\s*[:-]\s*(?:upi\/(?:(?:cr|dr|p2a|p2m)\/)?(?:\d+\/)?)?([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,

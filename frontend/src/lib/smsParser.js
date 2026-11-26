@@ -31,15 +31,20 @@ const CATEGORY_KEYWORDS = {
   ],
   subscriptions: [
     'netflix', 'spotify', 'prime', 'youtube premium', 'apple', 'google one', 'gym',
-    'cult.fit', 'cultfit', 'gold gym', 'subscription', 'membership', 'cloud',
+    'cult.fit', 'cultfit', 'gold gym', 'jio', 'airtel', 'vodafone', 'vi prepaid', 'vi postpaid',
+    'vi recharge', 'bsnl', 'tata play', 'tatasky', 'dish tv', 'sun direct', 'd2h',
+    'dth', 'recharge', 'recharged', 'prepaid', 'postpaid', 'subscription', 'membership', 'cloud',
   ],
   'health-wellness': [
     'apollo', 'pharmeasy', '1mg', 'tata 1mg', 'netmeds', 'medplus', 'pharmacy', 'chemist',
     'hospital', 'clinic', 'doctor', 'diagnostic', 'dr lal', 'lenskart', 'dentist',
   ],
   housing: [
-    'rent', 'maintenance', 'electricity', 'bescom', 'tata power', 'adani power', 'water bill',
-    'piped gas', 'indane', 'hp gas', 'bharat gas', 'wifi', 'broadband', 'act fibernet', 'airtel broadband',
+    'bescom', 'tata power', 'adani power', 'tsspdcl', 'apspdcl', 'msedcl', 'mseb', 'bses',
+    'tneb', 'kseb', 'uppcl', 'cesc', 'nbpdcl', 'sbpdcl', 'dgvcl', 'mgvcl', 'ugvcl', 'pgvcl',
+    'torrent power', 'electricity', 'power bill', 'powerbill', 'eb bill', 'light bill',
+    'water bill', 'piped gas', 'indane', 'hp gas', 'bharat gas', 'wifi', 'broadband',
+    'act fibernet', 'airtel broadband', 'bbps', 'bharat billpay', 'billdesk', 'rent', 'maintenance',
   ],
   education: [
     'coursera', 'udemy', 'unacademy', 'byju', 'school', 'college', 'tuition', 'books', 'stationery',
@@ -184,6 +189,9 @@ const EXPENSE_RECIPIENT_PATTERNS = [
   },
   {
     re: /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|towards|to|at)\s+(?!(?:you|your|yours|a\/c|acct|account|self|vpa|rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|[,.;/]|$)/i,
+  },
+  {
+    re: /\b(?:bill\s+(?:paid|payment)|recharged?)\b.*?\bfor\s+(?!(?:rs\.?|inr|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+successful|\s+completed|[,.;/]|$)/i,
   },
   {
     re: /\binfo\s*[:-]\s*(?:upi\/(?:(?:cr|dr|p2a|p2m)\/)?(?:\d+\/)?)?([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:[/,.;(]|$)/i,

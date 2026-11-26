@@ -29,7 +29,7 @@ public final class MoneyMapExpenseWebhook {
     private static final long DEDUPE_WINDOW_MS = 30_000L;
 
     private static final Pattern DEBIT_SIGNAL = Pattern.compile(
-        "(?:debited|paid\\s+to|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|charged|purchase|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
+        "(?:debited|paid\\s+(?:to|rs|inr|₹)|payment\\s+(?:of\\s+)?(?:rs|inr|₹)|sent\\s+(?:rs|inr|₹)|spent|withdrawn|deducted|charged|purchase|recharged?|bill\\s+(?:paid|payment)|dr\\.?\\s+(?:rs|inr|₹)|you\\s+(?:paid|sent))",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -39,12 +39,12 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern GENERIC_BANK_SIGNAL = Pattern.compile(
-        "(?:upi|vpa|a/c|acct|account)",
+        "(?:upi|vpa|a/c|acct|account|bbps)",
         Pattern.CASE_INSENSITIVE
     );
 
     private static final Pattern IGNORE_SIGNAL = Pattern.compile(
-        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|requested\\s+(?:rs|inr|₹|money)|transaction\\s+failed|payment\\s+failed|declined)\\b",
+        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|pre-?approved\\s+loan|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled)\\b",
         Pattern.CASE_INSENSITIVE
     );
 
