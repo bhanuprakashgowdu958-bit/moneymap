@@ -78,7 +78,7 @@ function cleanText(text) {
 }
 
 function formatPartyName(str) {
-  return str
+  const words = String(str || '')
     .split(/\s+/)
     .filter(Boolean)
     .map((w) => {
@@ -86,8 +86,16 @@ function formatPartyName(str) {
       const hasLower = /[a-z]/.test(w);
       if (hasUpper && hasLower) return w;
       return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-    })
-    .join(' ');
+    });
+  if (words.length >= 2 && words.length % 2 === 0) {
+    const half = words.length / 2;
+    const first = words.slice(0, half).join(' ');
+    const second = words.slice(half).join(' ');
+    if (first.toLowerCase() === second.toLowerCase()) {
+      return first;
+    }
+  }
+  return words.join(' ');
 }
 
 function stripLeadingNoise(raw) {

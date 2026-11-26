@@ -97,8 +97,20 @@ const STRONG_INCOME_RE =
 const GENERIC_TXN_VERB_RE =
   /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|trf|deducted|charged|recharged?|bill\s+payment|purchase|refund|cashback|salary)\b/i;
 
+function collapseRepeatedPhrase(words) {
+  if (words.length >= 2 && words.length % 2 === 0) {
+    const half = words.length / 2;
+    const first = words.slice(0, half).join(' ');
+    const second = words.slice(half).join(' ');
+    if (first.toLowerCase() === second.toLowerCase()) {
+      return first;
+    }
+  }
+  return words.join(' ');
+}
+
 function formatPartyName(str) {
-  return str
+  const words = String(str || '')
     .split(/\s+/)
     .filter(Boolean)
     .map((w) => {
@@ -106,8 +118,8 @@ function formatPartyName(str) {
       const hasLower = /[a-z]/.test(w);
       if (hasUpper && hasLower) return w;
       return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-    })
-    .join(' ');
+    });
+  return collapseRepeatedPhrase(words);
 }
 
 function stripLeadingNoise(raw) {
@@ -428,6 +440,109 @@ export function parseTransactionSms(rawText, meta = {}) {
   };
 }
 
+const GENERIC_PARTY_NAMES = new Set([
+  '',
+  'bank credit',
+  'bank debit expense',
+  'upi money received',
+  'upi transfer',
+  'other',
+  'expense',
+  'income',
+  'cashback received',
+  'refund received',
+]);
+
+function isGenericParty(name) {
+  return GENERIC_PARTY_NAMES.has(String(name || '').trim().toLowerCase());
+}
+
+/**
+ * Checks recent Firestore expenses for an identical transaction logged by another channel
+ * (e.g. Bank SMS + PhonePe notification for the same payment) within 3 minutes, merging
+ * missing sender name or accountHint instead of creating a duplicate entry.
+ */
+async function findAndMergeDuplicateTransaction(uid, parsed, nowIso) {
+  try {
+    let listRes = await fetch(
+      `${FIRESTORE_BASE}/users/${encodeURIComponent(uid)}/expenses?pageSize=25&orderBy=${encodeURIComponent('createdAt desc')}&key=${FIREBASE_API_KEY}`
+    );
+    if (!listRes.ok) {
+      listRes = await fetch(
+        `${FIRESTORE_BASE}/users/${encodeURIComponent(uid)}/expenses?pageSize=100&key=${FIREBASE_API_KEY}`
+      );
+    }
+    if (!listRes.ok) return { duplicate: false };
+
+    const data = await listRes.json();
+    const docs = data?.documents || [];
+    const targetMs = new Date(parsed.dateIso).getTime();
+    const incomingAmount = Number(parsed.amount);
+    const incomingName = String(parsed.counterparty || parsed.title || '').trim().toLowerCase();
+
+    for (const d of docs) {
+      const f = d.fields || {};
+      const existingType = f.type?.stringValue === 'income' ? 'income' : 'expense';
+      if (existingType !== parsed.type) continue;
+
+      const existingAmt = Number(f.amount?.doubleValue ?? f.amount?.integerValue ?? 0);
+      if (Math.abs(existingAmt - incomingAmount) >= 0.01) continue;
+
+      const rawExistingDate = f.date?.timestampValue || f.createdAt?.timestampValue;
+      const existingMs = rawExistingDate ? new Date(rawExistingDate).getTime() : NaN;
+      if (Number.isNaN(existingMs) || Math.abs(targetMs - existingMs) > 180_000) continue;
+
+      const existingTitle = String(f.title?.stringValue || '').trim();
+      const existingCounterparty = String(f.counterparty?.stringValue || '').trim();
+      const existingName = (existingCounterparty || existingTitle).toLowerCase();
+
+      const bothNamedAndDistinct =
+        !isGenericParty(existingName) &&
+        !isGenericParty(incomingName) &&
+        !existingName.includes(incomingName) &&
+        !incomingName.includes(existingName);
+      if (bothNamedAndDistinct) continue;
+
+      const patchFields = {};
+      const fieldPaths = [];
+      if (isGenericParty(existingTitle) && parsed.title && !isGenericParty(parsed.title)) {
+        patchFields.title = { stringValue: parsed.title };
+        fieldPaths.push('title');
+      }
+      if (isGenericParty(existingCounterparty) && parsed.counterparty && !isGenericParty(parsed.counterparty)) {
+        patchFields.counterparty = { stringValue: parsed.counterparty };
+        fieldPaths.push('counterparty');
+      }
+      const existingAcc = String(f.accountHint?.stringValue || '').trim();
+      if (!existingAcc && parsed.accountHint) {
+        patchFields.accountHint = { stringValue: parsed.accountHint };
+        fieldPaths.push('accountHint');
+      }
+
+      if (fieldPaths.length > 0 && d.name) {
+        patchFields.updatedAt = { timestampValue: nowIso };
+        fieldPaths.push('updatedAt');
+        const maskParams = fieldPaths
+          .map((p) => `updateMask.fieldPaths=${encodeURIComponent(p)}`)
+          .join('&');
+        await fetch(
+          `https://firestore.googleapis.com/v1/${d.name}?${maskParams}&key=${FIREBASE_API_KEY}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: patchFields }),
+          }
+        ).catch(() => {});
+      }
+
+      return { duplicate: true, merged: fieldPaths.length > 0 };
+    }
+  } catch {
+    // Non-blocking fallback: continue writing if lookup fails
+  }
+  return { duplicate: false };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -482,6 +597,19 @@ export default async function handler(req, res) {
     }
 
     const nowIso = new Date().toISOString();
+    const dedupeCheck = await findAndMergeDuplicateTransaction(uid, parsed, nowIso);
+    if (dedupeCheck.duplicate) {
+      return res.status(200).json({
+        success: true,
+        ignored: true,
+        deduplicated: true,
+        merged: Boolean(dedupeCheck.merged),
+        reason: dedupeCheck.merged
+          ? 'Merged duplicate SMS/UPI alert into existing transaction'
+          : 'Duplicate transaction within 3 minutes ignored',
+      });
+    }
+
     const noteText = parsed.type === 'income'
       ? '💰 Auto-logged Income via Phone SMS / UPI'
       : '📱 Auto-logged Expense via Phone SMS / UPI';

@@ -47,7 +47,12 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern CREDIT_SIGNAL = Pattern.compile(
-        "(?:credited|received|deposited|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s*(?:to|by|in)|[0-9]\\s*cr\\.?\\b)",
+        "(?:credited|received|deposited|paid\\s+you|sent\\s+you|(?:paid|sent|transferred)\\s+(?:(?:rs\\.?|inr|₹)\\s*[0-9,]+(?:\\.[0-9]{1,2})?\\s+)?to\\s+you\\b|credit\\s+(?:of|to|in)|cr\\.?\\s*(?:to|by|in)|[0-9]\\s*cr\\.?\\b)",
+        Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern ACCOUNT_DEBIT_SIGNAL = Pattern.compile(
+        "\\b(?:(?:your\\s+)?(?:[A-Za-z]+\\s+){0,3}(?:a/c|ac\\.?|acct|account|card)\\s*(?:no\\.?)?\\s*(?:[*xX]+\\d+|\\d+)?\\s*(?:is|has\\s+been)?\\s*debited|debited\\s+(?:(?:from|by|for|with)\\s+(?:(?:[A-Za-z]+\\s+){0,3}(?:your|a/c|ac\\.?|acct|account|card)|(?:rs\\.?|inr|₹)?\\s*[0-9,.]+)|(?:rs\\.?|inr|₹)\\s*[0-9,.]+))\\b",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -218,7 +223,7 @@ public final class MoneyMapExpenseWebhook {
         Context appCtx = context.getApplicationContext();
         String sourceTag = (sourcePackage != null && !sourcePackage.isEmpty()) ? sourcePackage : "SMS_BROADCAST";
         long now = System.currentTimeMillis();
-        String dedupeKey = buildDedupeKey(rawText);
+        String dedupeKey = buildDedupeKey(rawText, sourcePackage);
         if (isDuplicateAndRecord(appCtx, dedupeKey, now)) {
             appendDiagnosticLog(appCtx, sourceTag, "DEDUPED_LIVE", rawText);
             if (onComplete != null) onComplete.run();
@@ -445,15 +450,23 @@ public final class MoneyMapExpenseWebhook {
     private static final int MAX_DIAGNOSTIC_LOGS = 20;
     private static final Object LOG_LOCK = new Object();
 
-    private static String buildDedupeKey(String text) {
-        boolean hasCredit = CREDIT_SIGNAL.matcher(text).find();
-        boolean hasExplicitDebit = DEBIT_SIGNAL.matcher(text).find();
-        String dir = (hasCredit && !hasExplicitDebit) ? "cr:" : "dr:";
+    private static boolean isSmsChannel(String sourcePackage) {
+        if (sourcePackage == null || sourcePackage.isEmpty()) return true;
+        String lower = sourcePackage.toLowerCase(Locale.ROOT);
+        return lower.contains("messaging") || lower.contains(".mms") || lower.contains("truecaller");
+    }
+
+    private static String buildDedupeKey(String text, String sourcePackage) {
+        boolean hasIncomeSignal = CREDIT_SIGNAL.matcher(text).find();
+        boolean hasAccountDebit = ACCOUNT_DEBIT_SIGNAL.matcher(text).find();
+        boolean isIncome = hasIncomeSignal && !hasAccountDebit;
+        String dir = isIncome ? "cr:" : "dr:";
+        String channel = isSmsChannel(sourcePackage) ? "sms:" : "app:";
         String amt = extractAmountString(text);
         if (amt != null) {
-            return dir + "amt:" + amt;
+            return channel + dir + "amt:" + amt;
         }
-        return dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
+        return channel + dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
     }
 
     public static void recordFilteredEvent(Context context, String source, String pkgOrSender, String rawText) {

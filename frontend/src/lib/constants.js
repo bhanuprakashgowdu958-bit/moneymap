@@ -199,6 +199,19 @@ export const getBudgetStatus = (percentage) => {
   return { label: 'On Track', color: 'text-emerald-600', bg: 'bg-emerald-500' };
 };
 
+function collapseRepeatedPhrase(value) {
+  const words = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && words.length % 2 === 0) {
+    const half = words.length / 2;
+    const first = words.slice(0, half).join(' ');
+    const second = words.slice(half).join(' ');
+    if (first.toLowerCase() === second.toLowerCase()) {
+      return first;
+    }
+  }
+  return words.join(' ');
+}
+
 /**
  * Normalizes a transaction (expense or income, including legacy webhook records)
  * into clean counterparty display metadata for UI rows.
@@ -208,9 +221,9 @@ export function getTransactionDisplay(transaction) {
   const cat = getCategoryMeta(transaction?.category, transaction?.type);
   const paymentMeta = PAYMENT_METHODS.find((p) => p.value === transaction?.paymentMethod) || PAYMENT_METHODS[0];
 
-  let rawName = String(transaction?.counterparty || transaction?.title || '').trim();
+  let rawName = collapseRepeatedPhrase(transaction?.counterparty || transaction?.title || '');
   if (isIncome) {
-    rawName = rawName.replace(/^from\s+/i, '').trim();
+    rawName = collapseRepeatedPhrase(rawName.replace(/^from\s+/i, '').trim());
   }
   if (!rawName || ['you', 'your', 'yours'].includes(rawName.toLowerCase())) {
     rawName = cat?.label || (isIncome ? 'UPI Transfer' : 'Expense');

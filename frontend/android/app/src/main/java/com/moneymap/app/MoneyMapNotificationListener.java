@@ -75,10 +75,14 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
             text = charSeqToString(extras.getCharSequence(Notification.EXTRA_TEXT));
         }
         String subText = charSeqToString(extras.getCharSequence(Notification.EXTRA_SUB_TEXT));
-        if (!subText.isEmpty() && !text.contains(subText)) {
+        if (!subText.isEmpty()
+            && !text.toLowerCase(Locale.ROOT).contains(subText.toLowerCase(Locale.ROOT))
+            && !title.toLowerCase(Locale.ROOT).contains(subText.toLowerCase(Locale.ROOT))) {
             text = (text + " " + subText).trim();
         }
-        String combined = (title + " " + text).trim();
+        String combined = (!title.isEmpty() && text.toLowerCase(Locale.ROOT).startsWith(title.toLowerCase(Locale.ROOT)))
+            ? text
+            : (title + " " + text).trim();
         String senderForSmsCheck = title;
 
         // Check MessagingStyle bundle array (used by Google Messages & grouped SMS alerts)
