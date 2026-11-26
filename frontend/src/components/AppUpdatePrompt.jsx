@@ -9,7 +9,7 @@ import {
   stageOtaForNextRestart,
 } from '../lib/otaUpdater';
 
-const AUTO_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours between silent background checks
+const AUTO_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes between background update checks
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours after tapping "Later"
 const LAST_CHECK_KEY = 'moneymap_ota_last_check';
 const DISMISSED_KEY = 'moneymap_ota_dismissed';
@@ -125,17 +125,15 @@ export default function AppUpdatePrompt() {
         const result = await checkAndPrepareOtaUpdate();
         saveLastCheckTime(now);
 
-        if (result.status === 'ready') {
-          const isForced = Boolean(result.remote?.forceUpdate);
-          if (isForced) {
-            setUpdateInfo(result);
-          } else if (result.bundle?.id) {
-            // Normal web updates install silently on the next app background/restart — 0 popups
-            await stageOtaForNextRestart(result.bundle.id);
-          }
-        } else if (result.status === 'native_required') {
+        if (result.status === 'ready' || result.status === 'native_required') {
           const remoteVer = result.remote?.version || '';
           const isForced = Boolean(result.remote?.forceUpdate);
+
+          if (result.status === 'ready' && result.bundle?.id) {
+            // Also stage for next restart in case the user taps "Later"
+            await stageOtaForNextRestart(result.bundle.id);
+          }
+
           if (isForced || !isSnoozed(remoteVer)) {
             setUpdateInfo(result);
           }
