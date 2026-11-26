@@ -40,7 +40,7 @@ import java.util.concurrent.Executors;
         ),
         @Permission(
             alias = "sms",
-            strings = { Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS }
+            strings = { Manifest.permission.RECEIVE_SMS }
         )
     }
 )
@@ -56,7 +56,6 @@ public class MoneyMapNativePlugin extends Plugin {
         requestNotificationListenerRebind(getContext());
         MoneyMapExpenseWebhook.registerNetworkCallback(getContext());
         MoneyMapExpenseWebhook.flushPendingAsync(getContext());
-        MoneyMapSmsInboxReader.syncRecentInboxAsync(getContext());
         if (MoneyMapPrefs.isAppGuardEnabled(getContext()) && hasUsageStatsAccess(getContext())) {
             Intent svc = new Intent(getContext(), AppGuardService.class);
             ContextCompat.startForegroundService(getContext(), svc);
@@ -69,7 +68,6 @@ public class MoneyMapNativePlugin extends Plugin {
         String budgetCheckBase = call.getString("budgetCheckBase", "");
         MoneyMapPrefs.setConfig(getContext(), webhookUrl, budgetCheckBase);
         MoneyMapExpenseWebhook.flushPendingAsync(getContext());
-        MoneyMapSmsInboxReader.syncRecentInboxAsync(getContext());
         call.resolve();
     }
 
@@ -335,25 +333,12 @@ public class MoneyMapNativePlugin extends Plugin {
         String webhookUrl = MoneyMapPrefs.getWebhookUrl(ctx);
         ret.put("hasWebhookUrl", webhookUrl != null && !webhookUrl.isEmpty());
         ret.put("hasSmsPermission", hasSmsPermission(ctx));
-        ret.put("hasReadSmsPermission", hasReadSmsPermission(ctx));
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(ctx));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(ctx));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(ctx));
         ret.put("pendingQueueCount", MoneyMapExpenseWebhook.getPendingQueueCount(ctx));
         ret.put("logsJson", MoneyMapPrefs.getCaptureLogsJson(ctx));
         call.resolve(ret);
-    }
-
-    @PluginMethod
-    public void syncSmsInboxNow(PluginCall call) {
-        Context ctx = getContext().getApplicationContext();
-        APK_EXECUTOR.execute(() -> {
-            int synced = MoneyMapSmsInboxReader.syncRecentInboxBlocking(ctx);
-            MoneyMapExpenseWebhook.flushPendingAsync(ctx);
-            JSObject ret = new JSObject();
-            ret.put("synced", synced);
-            call.resolve(ret);
-        });
     }
 
     public static void requestNotificationListenerRebind(Context context) {
@@ -373,12 +358,6 @@ public class MoneyMapNativePlugin extends Plugin {
 
     private static boolean hasSmsPermission(Context context) {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS)
-            == PackageManager.PERMISSION_GRANTED
-            && hasReadSmsPermission(context);
-    }
-
-    private static boolean hasReadSmsPermission(Context context) {
-        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS)
             == PackageManager.PERMISSION_GRANTED;
     }
 

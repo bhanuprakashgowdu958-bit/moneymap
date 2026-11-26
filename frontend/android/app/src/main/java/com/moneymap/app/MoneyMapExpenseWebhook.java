@@ -187,7 +187,6 @@ public final class MoneyMapExpenseWebhook {
             return;
         }
 
-        recordLoggedSignature(appCtx, dedupeKey, now);
         registerNetworkCallback(appCtx);
 
         EXECUTOR.execute(() -> {
@@ -215,43 +214,6 @@ public final class MoneyMapExpenseWebhook {
                 if (onComplete != null) onComplete.run();
             }
         });
-    }
-
-    /**
-     * Submits a recent SMS found in the device inbox (when READ_SMS is granted) if it was
-     * not already captured live by SMS_RECEIVED or NotificationListenerService.
-     */
-    public static boolean submitHistoricalSmsSync(
-        Context context,
-        String rawText,
-        long smsDateMs,
-        String sender
-    ) {
-        if (context == null || rawText == null || !looksLikeDebitExpense(rawText)) return false;
-        Context appCtx = context.getApplicationContext();
-        String dedupeKey = buildDedupeKey(rawText);
-        if (wasSignatureLoggedNear(appCtx, dedupeKey, smsDateMs, 180_000L)) {
-            return false;
-        }
-
-        long occurredAt = smsDateMs > 0 ? smsDateMs : System.currentTimeMillis();
-        JSONObject payload = buildPayload(rawText, "", rawText, sender, occurredAt);
-        if (payload == null) return false;
-
-        recordLoggedSignature(appCtx, dedupeKey, occurredAt);
-        String webhookUrl = MoneyMapPrefs.getWebhookUrl(appCtx);
-        if (webhookUrl == null || webhookUrl.isEmpty() || !isNetworkAvailable(appCtx)) {
-            enqueuePending(appCtx, payload);
-            appendDiagnosticLog(appCtx, "SMS_INBOX", "QUEUED_OFFLINE", rawText);
-            return true;
-        }
-
-        SendResult result = postPayload(appCtx, webhookUrl, payload, "SMS_INBOX");
-        if (result == SendResult.RETRY_TRANSIENT) {
-            enqueuePending(appCtx, payload);
-            appendDiagnosticLog(appCtx, "SMS_INBOX", "QUEUED_RETRY", rawText);
-        }
-        return result != SendResult.DROP_PERMANENT;
     }
 
     private static String extractAmountString(String text) {
@@ -436,8 +398,6 @@ public final class MoneyMapExpenseWebhook {
         MoneyMapPrefs.setPendingWebhooksJson(context, arr.toString());
     }
 
-    private static final long SIGNATURE_RETENTION_MS = 48L * 60L * 60L * 1000L;
-    private static final int MAX_SIGNATURE_ENTRIES = 120;
     private static final int MAX_DIAGNOSTIC_LOGS = 20;
     private static final Object LOG_LOCK = new Object();
 
@@ -450,45 +410,6 @@ public final class MoneyMapExpenseWebhook {
             return dir + "amt:" + amt;
         }
         return dir + "txt:" + text.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static void recordLoggedSignature(Context context, String key, long tsMs) {
-        synchronized (DEDUPE_LOCK) {
-            try {
-                long cutoff = System.currentTimeMillis() - SIGNATURE_RETENTION_MS;
-                JSONArray oldArr = new JSONArray(MoneyMapPrefs.getLoggedSignaturesJson(context));
-                JSONArray nextArr = new JSONArray();
-                int start = Math.max(0, oldArr.length() - (MAX_SIGNATURE_ENTRIES - 1));
-                for (int i = start; i < oldArr.length(); i++) {
-                    JSONObject obj = oldArr.optJSONObject(i);
-                    if (obj != null && obj.optLong("ts", 0L) >= cutoff) {
-                        nextArr.put(obj);
-                    }
-                }
-                JSONObject entry = new JSONObject();
-                entry.put("k", key);
-                entry.put("ts", tsMs);
-                nextArr.put(entry);
-                MoneyMapPrefs.setLoggedSignaturesJson(context, nextArr.toString());
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private static boolean wasSignatureLoggedNear(Context context, String key, long tsMs, long windowMs) {
-        synchronized (DEDUPE_LOCK) {
-            try {
-                JSONArray arr = new JSONArray(MoneyMapPrefs.getLoggedSignaturesJson(context));
-                for (int i = arr.length() - 1; i >= 0; i--) {
-                    JSONObject obj = arr.optJSONObject(i);
-                    if (obj == null) continue;
-                    if (key.equals(obj.optString("k", ""))
-                        && Math.abs(tsMs - obj.optLong("ts", 0L)) <= windowMs) {
-                        return true;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-        return false;
     }
 
     public static void recordFilteredEvent(Context context, String source, String pkgOrSender, String rawText) {

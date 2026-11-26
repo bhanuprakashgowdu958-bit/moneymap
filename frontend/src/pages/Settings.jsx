@@ -17,7 +17,6 @@ import {
   openAppInfoSettings,
   requestNativeNotifications,
   getNativeDiagnostics,
-  syncNativeSmsInboxNow,
 } from '../lib/nativeBridge';
 import {
   checkAndPrepareOtaUpdate,
@@ -44,7 +43,6 @@ export default function Settings() {
   const [showAdvancedAutomation, setShowAdvancedAutomation] = useState(false);
   const [nativeStatus, setNativeStatus] = useState(null);
   const [nativeDiag, setNativeDiag] = useState(null);
-  const [syncingInbox, setSyncingInbox] = useState(false);
   const [showDiagLogs, setShowDiagLogs] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const fileInputRef = useRef(null);
@@ -573,47 +571,16 @@ export default function Settings() {
                 )}
               </div>
 
-              {/* Manual SMS Inbox Sync + Live Diagnostics */}
+              {/* Capture Status & Logs */}
               <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-semibold text-gray-900">SMS Recovery & Diagnostics</p>
+                    <p className="text-sm font-semibold text-gray-900">Auto-Track Diagnostics</p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Scan last 48h bank SMS inbox or check capture status
+                      Live capture health and recent SMS / notification events
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={syncingInbox}
-                      onClick={async () => {
-                        setSyncingInbox(true);
-                        try {
-                          if (!nativeStatus?.hasSmsPermission) {
-                            const perm = await requestNativeSmsPermission();
-                            if (!perm?.granted) {
-                              toast.error('Allow SMS permission first to scan bank SMS.');
-                              return;
-                            }
-                          }
-                          await syncNativeConfig(webhookToken);
-                          const res = await syncNativeSmsInboxNow();
-                          refreshNativeStatus();
-                          toast.success(
-                            res?.synced > 0
-                              ? `Synced ${res.synced} missed bank SMS transaction${res.synced > 1 ? 's' : ''}!`
-                              : 'Inbox checked — no missed bank SMS found'
-                          );
-                        } catch {
-                          toast.error('Could not scan SMS inbox');
-                        } finally {
-                          setSyncingInbox(false);
-                        }
-                      }}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-                    >
-                      {syncingInbox ? 'Scanning SMS...' : '📩 Sync Bank SMS Now'}
-                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -633,7 +600,7 @@ export default function Settings() {
                       {nativeDiag.hasWebhookUrl ? '✓ Webhook Synced' : '✗ Webhook Not Synced'}
                     </span>
                     <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasSmsPermission ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
-                      {nativeDiag.hasSmsPermission ? '✓ SMS Read + Receive' : '✗ SMS Permission Missing'}
+                      {nativeDiag.hasSmsPermission ? '✓ SMS Permission Active' : '✗ SMS Permission Missing'}
                     </span>
                     <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasNotificationAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
                       {nativeDiag.hasNotificationAccess ? '✓ Notification Access' : '✗ Notification Off'}

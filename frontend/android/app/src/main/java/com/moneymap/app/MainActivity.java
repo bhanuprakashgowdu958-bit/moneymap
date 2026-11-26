@@ -31,6 +31,5 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         MoneyMapNativePlugin.requestNotificationListenerRebind(this);
         MoneyMapExpenseWebhook.flushPendingAsync(this);
-        MoneyMapSmsInboxReader.syncRecentInboxAsync(this);
     }
 }

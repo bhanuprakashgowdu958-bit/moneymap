@@ -84,7 +84,6 @@ export async function getNativeDiagnostics() {
     return {
       hasWebhookUrl: false,
       hasSmsPermission: false,
-      hasReadSmsPermission: false,
       hasNotificationAccess: false,
       autoTrackEnabled: false,
       smsAutoTrackEnabled: false,
@@ -100,11 +99,6 @@ export async function getNativeDiagnostics() {
     logs = [];
   }
   return { ...res, logs: Array.isArray(logs) ? logs : [] };
-}
-
-export async function syncNativeSmsInboxNow() {
-  if (!isNativeAndroid()) return { synced: 0 };
-  return MoneyMapNative.syncSmsInboxNow();
 }
 
 export async function installNativeApkUpdate(apkUrl, onProgress) {
