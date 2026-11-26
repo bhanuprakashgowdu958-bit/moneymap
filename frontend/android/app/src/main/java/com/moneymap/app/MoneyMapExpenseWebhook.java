@@ -47,7 +47,7 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern CREDIT_SIGNAL = Pattern.compile(
-        "(?:credited|received|deposited|refund|cashback|salary|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s*(?:to|by|in)|[0-9]\\s*cr\\.?\\b)",
+        "(?:credited|received|deposited|paid\\s+you|sent\\s+you|to\\s+you|credit\\s+(?:of|to|in)|cr\\.?\\s*(?:to|by|in)|[0-9]\\s*cr\\.?\\b)",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -57,7 +57,7 @@ public final class MoneyMapExpenseWebhook {
     );
 
     private static final Pattern IGNORE_SIGNAL = Pattern.compile(
-        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|pre-?approved\\s+loan|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled)\\b",
+        "\\b(?:otp|one\\s+time\\s+password|verification\\s+code|payment\\s+request|collect\\s+request|has\\s+requested|requested\\s+(?:rs|inr|₹|money)|approve\\s+to\\s+pay|mandate\\s+(?:created|approved)|autopay\\s+(?:created|registered)|bill\\s+due|minimum\\s+due|pre-?approved|transaction\\s+failed|payment\\s+failed|declined|unsuccessful|cancelled|canceled|get\\s+(?:rs|inr|₹|up\\s*to|flat)|win\\s+(?:rs|inr|₹|up\\s*to)|earn\\s+(?:rs|inr|₹|up\\s*to)|avail\\s+(?:rs|inr|₹|up\\s*to)|unlock\\s+(?:rs|inr|₹)|claim\\s+(?:your|now)|chance\\s+to\\s+win|assured\\s+(?:cashback|reward)|up\\s*to\\s+(?:rs\\.?|inr|₹)|upto\\s+(?:rs\\.?|inr|₹)|flat\\s+(?:rs\\.?|inr|₹)?\\s*[0-9,.]+\\s*(?:off|cashback|discount)|scratch\\s+card|voucher|coupon|promo(?:\\s*code)?|use\\s+code|apply\\s+code|valid\\s+(?:till|until)|limited\\s+period|t&c\\s+apply|terms\\s+apply|congratulations|you(?:'ve|\\s+have)\\s+won|lucky\\s+draw|loan\\s+offer|credit\\s+limit|upgrade\\s+your\\s+card|apply\\s+now|shop\\s+(?:for|worth)|min(?:imum)?\\s+(?:spend|order)|cashback\\s+offer|special\\s+offer)\\b",
         Pattern.CASE_INSENSITIVE
     );
 

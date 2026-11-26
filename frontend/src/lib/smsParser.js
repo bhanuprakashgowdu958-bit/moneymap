@@ -64,8 +64,11 @@ const INVALID_PARTY_EXACT = new Set([
 const LEADING_NOTIFICATION_NOISE_RE =
   /^(?:google\s+pay|gpay|phonepe|paytm|bhim|amazon\s+pay|cred|whatsapp\s+pay|money\s+received|payment\s+received|received\s+money|payment\s+successful|upi\s+alert|transaction\s+alert|alert|update|dear\s+(?:sbi\s+)?(?:customer|user))\b[\s:!\-,]*/i;
 
+const PROMO_NOISE_RE =
+  /\b(?:get|win|earn|avail|enjoy|unlock|grab|claim(?:\s+your|\s+now)?|chance\s+to\s+win|assured\s+(?:cashback|reward)|up\s*to\s+(?:rs\.?|inr|₹)|upto\s+(?:rs\.?|inr|₹)|flat\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s*(?:off|cashback|discount)|scratch\s+card|voucher|coupon|promo(?:\s*code)?|use\s+code|apply\s+code|valid\s+(?:till|until)|limited\s+period|t&c\s+apply|terms\s+apply|congratulations|you(?:'ve|\s+have)\s+won|lucky\s+draw|pre-?approved|loan\s+offer|credit\s+limit|upgrade\s+your\s+card|apply\s+now|shop\s+(?:for|worth)|min(?:imum)?\s+(?:spend|order)|cashback\s+offer|special\s+offer)\b/i;
+
 const STRONG_INCOME_RE =
-  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s+(?:to|by)\b|\b(?:salary|cashback|refund|dividend|reimbursement|freelance|income)\b)/i;
+  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|\b(?:salary|freelance|income)\b|(?:cashback|refund|dividend|reimbursement)\s+(?:of\s+)?(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:credited|received|deposited|processed|issued)|(?:credited|received|deposited)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*\s*(?:as\s+)?(?:cashback|refund|salary|dividend|reimbursement))\b/i;
 
 const DEBIT_ACCOUNT_RE =
   /\b(?:(?:your\s+)?(?:[A-Za-z]+\s+){0,3}(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*(?:[*xX]+\d+|\d+)?\s*(?:is|has\s+been)?\s*debited|debited\s+(?:from|by|for|with)\s+(?:(?:[A-Za-z]+\s+){0,3}(?:your|a\/c|acct|account|card)|(?:rs\.?|inr|₹)?\s*[0-9,.]+))\b/i;
@@ -209,6 +212,9 @@ const EXPENSE_RECIPIENT_PATTERNS = [
 ];
 
 function detectTransactionType(text) {
+  if (PROMO_NOISE_RE.test(text)) {
+    return 'expense';
+  }
   if (STRONG_INCOME_RE.test(text) && !DEBIT_ACCOUNT_RE.test(text)) {
     return 'income';
   }

@@ -75,13 +75,17 @@ const NOISE_REASON_PATTERNS = [
   { re: /\b(?:otp|one\s*time\s*password|verification\s*code|mpin|cvv)\b/i, reason: 'OTP / security message ignored' },
   { re: /\b(?:requested\s+(?:rs|inr|₹|money)|payment\s+request|has\s+requested|collect\s+request|approve\s+to\s+pay|mandate\s+(?:created|approved)|autopay\s+(?:created|registered)|bill\s+due|minimum\s+due|pre-?approved\s+loan)\b/i, reason: 'Payment request / reminder ignored' },
   { re: /\b(?:failed|declined|unsuccessful|could\s+not\s+be\s+processed|cancelled|canceled|reversed\s+failure)\b/i, reason: 'Failed or declined transaction ignored' },
+  {
+    re: /\b(?:get|win|earn|avail|enjoy|unlock|grab|claim(?:\s+your|\s+now)?|chance\s+to\s+win|assured\s+(?:cashback|reward)|up\s*to\s+(?:rs\.?|inr|₹)|upto\s+(?:rs\.?|inr|₹)|flat\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s*(?:off|cashback|discount)|scratch\s+card|voucher|coupon|promo(?:\s*code)?|use\s+code|apply\s+code|valid\s+(?:till|until)|limited\s+period|t&c\s+apply|terms\s+apply|congratulations|you(?:'ve|\s+have)\s+won|lucky\s+draw|pre-?approved|loan\s+offer|credit\s+limit|upgrade\s+your\s+card|apply\s+now|shop\s+(?:for|worth)|min(?:imum)?\s+(?:spend|order)|cashback\s+offer|special\s+offer)\b/i,
+    reason: 'Promotional / offer message ignored',
+  },
 ];
 
 const STRONG_DEBIT_RE =
   /\b(?:debited|debit\s+(?:of|from|in)|withdrawn|spent|deducted|charged|recharged?|bill\s+(?:paid|payment)|payment\s+of\s+(?:rs\.?|inr|₹)?\s*[0-9,.]+\s+(?:to|for|successful|completed)|purchase\s+(?:of|at|on)|dr\.?\s*(?:from|by|to|rs|inr|₹)|[0-9,.]+\s*dr\.?\b|you\s+(?:have\s+)?(?:paid|sent|transferred)|(?:paid|sent|transferred|trf)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*(?:\s+to\s+(?!you\b|your\b))?|amt\s+sent)\b/i;
 
 const STRONG_INCOME_RE =
-  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|\b(?:salary|cashback|refund|dividend|reimbursement)\b)/i;
+  /\b(?:(?:paid|sent|transferred)\s+(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?to\s+you\b|(?:paid|sent)\s+you\b|you\s+(?:have\s+)?received\b|received\s+(?:rs\.?|inr|₹|money|payment|from)\b|(?:payment|amount)\s+(?:of\s+(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?received\b|money\s+received\b|credited\s+(?:to|in|into|with|by|for|rs\.?|inr|₹)|(?:has\s+been|is)\s+credited\b|credit\s+(?:of|to|in)\b|deposited\s+(?:in|to|into)\b|\bcr\.?\s*(?:to|by|in)\b|(?:cashback|refund|salary|dividend|reimbursement)\s+(?:of\s+)?(?:(?:rs\.?|inr|₹)\s*[0-9,.]+\s+)?(?:credited|received|deposited|processed|issued)|(?:credited|received|deposited)\s+(?:rs\.?|inr|₹)?\s*[0-9,.]*\s*(?:as\s+)?(?:cashback|refund|salary|dividend|reimbursement))\b/i;
 
 const GENERIC_TXN_VERB_RE =
   /\b(?:debited|credited|paid|sent|received|spent|withdrawn|deposited|transferred|trf|deducted|charged|recharged?|bill\s+payment|purchase|refund|cashback|salary)\b/i;
@@ -390,8 +394,8 @@ export function parseTransactionSms(rawText, meta = {}) {
 
   const lower = text.toLowerCase();
   let paymentMethod = 'upi';
-  if (lower.includes('card') || lower.includes('pos') || lower.includes('ending')) paymentMethod = 'card';
-  else if (lower.includes('neft') || lower.includes('imps') || lower.includes('rtgs')) paymentMethod = 'netbanking';
+  if (/\b(?:card|pos|ending)\b/.test(lower)) paymentMethod = 'card';
+  else if (/\b(?:neft|imps|rtgs)\b/.test(lower)) paymentMethod = 'netbanking';
 
   const accountHint = extractAccountHint(text);
 
