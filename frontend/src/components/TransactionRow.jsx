@@ -8,7 +8,6 @@ import { formatCurrency, formatDate, getTransactionDisplay } from '../lib/consta
 export default function TransactionRow({
   transaction,
   currency = '₹',
-  onDelete,
   compact = false,
   showDivider = false,
   className = '',
@@ -88,35 +87,23 @@ export default function TransactionRow({
         )}
       </div>
 
-      {/* Amount + Debited from / Credited to + Optional delete */}
-      <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-        <div className="text-right">
-          <p
-            className={`font-bold ${compact ? 'text-sm' : 'text-sm sm:text-base'} tabular-nums leading-snug ${
-              isIncome ? 'text-emerald-600' : 'text-gray-900'
-            }`}
-          >
-            {isIncome ? '+ ' : ''}
-            {formatCurrency(transaction.amount, currency)}
-          </p>
-          <p className="text-[10px] sm:text-[11px] text-gray-400 mt-0.5 flex items-center justify-end gap-1 whitespace-nowrap">
-            <span>{railLabel}</span>
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-semibold text-[10px]">
-              <span>{paymentMeta.icon}</span>
-              <span>{railSource}</span>
-            </span>
-          </p>
-        </div>
-        {onDelete && (
-          <button
-            type="button"
-            onClick={() => onDelete({ ...transaction, displayName })}
-            aria-label={`Delete ${displayName}`}
-            className="text-xs text-gray-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-          >
-            🗑️
-          </button>
-        )}
+      {/* Amount + Debited from / Credited to */}
+      <div className="text-right flex-shrink-0">
+        <p
+          className={`font-bold ${compact ? 'text-sm' : 'text-sm sm:text-base'} tabular-nums leading-snug ${
+            isIncome ? 'text-emerald-600' : 'text-gray-900'
+          }`}
+        >
+          {isIncome ? '+ ' : ''}
+          {formatCurrency(transaction.amount, currency)}
+        </p>
+        <p className="text-[10px] sm:text-[11px] text-gray-400 mt-0.5 flex items-center justify-end gap-1 whitespace-nowrap">
+          <span>{railLabel}</span>
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-semibold text-[10px]">
+            <span>{paymentMeta.icon}</span>
+            <span>{railSource}</span>
+          </span>
+        </p>
       </div>
     </div>
   );

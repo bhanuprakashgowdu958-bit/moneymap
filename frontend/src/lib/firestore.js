@@ -56,87 +56,11 @@ export async function withTimeout(promise, ms = FIRESTORE_READ_TIMEOUT_MS, fallb
 }
 
 function getInitialDemoExpenses() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const day = now.getDate();
-
-  return [
-    {
-      id: 'demo-1',
-      title: 'Zomato Biryani & Starters',
-      amount: 680,
-      category: 'food-delivery',
-      date: new Date(year, month, day, 20, 15).toISOString(),
-      paymentMethod: 'upi',
-      note: 'Dinner with friends',
-      isRecurring: false,
-    },
-    {
-      id: 'demo-2',
-      title: 'Swiggy Instamart Groceries',
-      amount: 920,
-      category: 'groceries',
-      date: new Date(year, month, Math.max(1, day - 1), 11, 30).toISOString(),
-      paymentMethod: 'upi',
-      note: 'Milk, vegetables, fruits & oats',
-      isRecurring: false,
-    },
-    {
-      id: 'demo-3',
-      title: 'Starbucks Cold Brew Coffee',
-      amount: 320,
-      category: 'drinks-beverages',
-      date: new Date(year, month, Math.max(1, day - 2), 16, 0).toISOString(),
-      paymentMethod: 'card',
-      note: 'Work catchup',
-      isRecurring: false,
-    },
-    {
-      id: 'demo-4',
-      title: 'Uber Ride to Office',
-      amount: 280,
-      category: 'transport',
-      date: new Date(year, month, Math.max(1, day - 3), 9, 45).toISOString(),
-      paymentMethod: 'upi',
-      note: 'Peak hour cab',
-      isRecurring: false,
-    },
-    {
-      id: 'demo-5',
-      title: 'Netflix & Spotify Subs',
-      amount: 799,
-      category: 'subscriptions',
-      date: new Date(year, month, 1, 10, 0).toISOString(),
-      paymentMethod: 'card',
-      note: 'Monthly auto-debit',
-      isRecurring: true,
-    },
-    {
-      id: 'demo-6',
-      title: 'Weekend Movie Tickets (PVR)',
-      amount: 550,
-      category: 'entertainment',
-      date: new Date(year, month, Math.max(1, day - 4), 18, 30).toISOString(),
-      paymentMethod: 'upi',
-      note: 'Evening show',
-      isRecurring: false,
-    },
-  ];
+  return [];
 }
 
 function getInitialDemoBudgets() {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-
-  return [
-    { id: `food-delivery_${month}_${year}`, category: 'food-delivery', limit: 4000, month, year, alertAt: 80 },
-    { id: `groceries_${month}_${year}`, category: 'groceries', limit: 8000, month, year, alertAt: 80 },
-    { id: `drinks-beverages_${month}_${year}`, category: 'drinks-beverages', limit: 2000, month, year, alertAt: 80 },
-    { id: `transport_${month}_${year}`, category: 'transport', limit: 3000, month, year, alertAt: 80 },
-    { id: `subscriptions_${month}_${year}`, category: 'subscriptions', limit: 1500, month, year, alertAt: 80 },
-  ];
+  return [];
 }
 
 export function loadLocal(key, defaultVal) {

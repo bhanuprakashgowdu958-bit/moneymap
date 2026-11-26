@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { applyExpenseFilters, deleteExpense, subscribeToExpenses } from '../lib/firestore';
+import { applyExpenseFilters, subscribeToExpenses } from '../lib/firestore';
 import {
   CATEGORIES,
   INCOME_CATEGORIES,
@@ -43,18 +43,6 @@ export default function Expenses() {
     () => applyExpenseFilters(allExpenses, filter),
     [allExpenses, filter]
   );
-
-  const handleDelete = async (item) => {
-    const label = item.displayName || item.title;
-    if (!window.confirm(`Delete "${label}" (${formatCurrency(item.amount, currency)})?`)) return;
-    try {
-      await deleteExpense(user.uid, item.id);
-      setAllExpenses((prev) => prev.filter((e) => e.id !== item.id));
-      toast.success('Transaction deleted');
-    } catch {
-      toast.error('Failed to delete transaction');
-    }
-  };
 
   const expenseSum = expenses.filter((e) => e.type !== 'income').reduce((s, e) => s + e.amount, 0);
   const incomeSum  = expenses.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0);
@@ -161,7 +149,6 @@ export default function Expenses() {
               key={e.id}
               transaction={e}
               currency={currency}
-              onDelete={handleDelete}
               showDivider={idx < expenses.length - 1}
             />
           ))}
