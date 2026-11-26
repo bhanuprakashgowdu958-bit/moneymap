@@ -45,6 +45,20 @@ public class MoneyMapSmsReceiver extends BroadcastReceiver {
         for (Map.Entry<String, StringBuilder> entry : bySender.entrySet()) {
             String text = entry.getValue().toString().trim();
             String sender = entry.getKey();
+            if (!MoneyMapExpenseWebhook.isTrustedBankSmsSender(sender)) {
+                if (MoneyMapExpenseWebhook.looksLikeDebitExpense(text)) {
+                    MoneyMapExpenseWebhook.appendDiagnosticLog(
+                        context,
+                        "SMS_BROADCAST:" + sender,
+                        "IGNORED_PERSONAL_SENDER",
+                        text
+                    );
+                }
+                if (remaining.decrementAndGet() == 0 && pendingResult != null) {
+                    pendingResult.finish();
+                }
+                continue;
+            }
             if (!MoneyMapExpenseWebhook.looksLikeDebitExpense(text)) {
                 MoneyMapExpenseWebhook.recordFilteredEvent(context, "SMS_BROADCAST", sender, text);
             }

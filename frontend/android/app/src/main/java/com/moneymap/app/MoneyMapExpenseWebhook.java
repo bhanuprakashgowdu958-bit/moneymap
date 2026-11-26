@@ -92,7 +92,51 @@ public final class MoneyMapExpenseWebhook {
     private static final Object QUEUE_LOCK = new Object();
     private static final AtomicBoolean NETWORK_CALLBACK_REGISTERED = new AtomicBoolean(false);
 
+    private static final Pattern PHONE_NUMBER_SENDER = Pattern.compile(
+        "^(?:\\+?\\d[\\d\\s\\-()]{7,18}\\d)$"
+    );
+
+    private static final Pattern DLT_ALPHANUM_HEADER = Pattern.compile(
+        "^(?:[A-Z]{2}-[A-Z0-9-]{3,14}|[A-Z0-9]{6,12}|\\d{3,8})$"
+    );
+
+    private static final Pattern BANK_OR_FINTECH_NAME = Pattern.compile(
+        "\\b(?:bank|upi|paytm|phonepe|gpay|google\\s*pay|bhim|amazon\\s*pay|cred|sbi|hdfc|icici|axis|kotak|union\\s*bank|uboi|unionb|canara|baroda|bob|pnb|indusind|idfc|federal|yes\\s*bank|rbl|hsbc|citi|au\\s*small|slice|jupiter|mobikwik|freecharge|airtel\\s*payments|jio\\s*payments|bbps|npci|visa|mastercard|rupay|amex|epfo|lic|nsdl|cards?)\\b",
+        Pattern.CASE_INSENSITIVE
+    );
+
     private MoneyMapExpenseWebhook() {}
+
+    /**
+     * Returns true only for official carrier/DLT sender IDs or short codes,
+     * filtering out normal personal 10-digit mobile numbers from friends.
+     */
+    public static boolean isTrustedBankSmsSender(String sender) {
+        if (sender == null) return false;
+        String trimmed = sender.trim();
+        if (trimmed.isEmpty()) return false;
+        if (PHONE_NUMBER_SENDER.matcher(trimmed).matches()) {
+            String digitsOnly = trimmed.replaceAll("\\D", "");
+            return digitsOnly.length() >= 3 && digitsOnly.length() <= 8;
+        }
+        return true;
+    }
+
+    /**
+     * Returns true when an SMS-app notification title/sender represents a bank, DLT header,
+     * short code, or payment brand rather than a personal friend contact.
+     */
+    public static boolean isTrustedSmsNotificationSender(String senderTitle) {
+        if (senderTitle == null) return false;
+        String cleaned = senderTitle.trim();
+        if (cleaned.isEmpty()) return false;
+        if (PHONE_NUMBER_SENDER.matcher(cleaned).matches()) {
+            String digitsOnly = cleaned.replaceAll("\\D", "");
+            return digitsOnly.length() >= 3 && digitsOnly.length() <= 8;
+        }
+        if (DLT_ALPHANUM_HEADER.matcher(cleaned).matches()) return true;
+        return BANK_OR_FINTECH_NAME.matcher(cleaned).find();
+    }
 
     public static boolean looksLikeDebitExpense(String text) {
         if (text == null || text.trim().length() < 6) return false;
