@@ -111,7 +111,7 @@ function stripLeadingNoise(raw) {
 function cleanPartyCandidate(raw) {
   if (!raw) return '';
   const cleaned = stripLeadingNoise(raw)
-    .replace(/\b(?:via|using|through|on|in\s+your|in\s+a\/c|into|to\s+your|to\s+a\/c|ref(?:\s+no)?|upi\s+ref|utr|avl\.?\s*bal|bal(?:ance)?)\b.*$/i, '')
+    .replace(/(?:\s*(?:rs\.?|inr|₹)\s*[0-9,.]+|\b(?:via|using|through|on|in\s+your|in\s+a\/c|into|to\s+your|to\s+a\/c|ref(?:\s+no)?|upi\s+ref|utr|transaction\s+id|transfer\s+details|debited\s+from|credited\s+to|completed|successful|done|share\s+receipt|avl\.?\s*bal|bal(?:ance)?)\b).*$/i, '')
     .replace(/\b(?:at|from|to)\s+(?=\d|your\b|a\/c\b|acct\b|account\b|vpa\b|upi\b).*$/i, '')
     .replace(/^(?:mr|mrs|ms|miss|shri|dr)\.?\s+/i, '')
     .replace(/[^\w\s&.'-]/g, ' ')
@@ -168,10 +168,10 @@ const INCOME_SENDER_PATTERNS = [
     re: /\b(?:from|by)\s+(?:vpa\s+)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\s*\(\s*(?!upi\b|ref\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s*\)/i,
   },
   {
-    re: /\b(?:received(?:\s+(?:of\s+)?(?:rs\.?|inr|₹)\s*[0-9,.]+)?\s+from|transfer\s+from|transferred\s+from)\s+(?!(?:rs\.?|inr|vpa)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|\s+in\s+your|\s+in\s+a\/c|\s+to\s+your|\s+into|[,.;/]|$)/i,
+    re: /\b(?:received(?:\s+(?:of\s+)?(?:rs\.?|inr|₹)\s*[0-9,.]+)?\s+from|transfer\s+from|transferred\s+from)\s+(?!(?:rs\.?|inr|vpa)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+[A-Za-z0-9._-]+@|\s*(?:rs\.?|inr|₹)|\s+(?:on\b|via\b|ref|using\b|through\b|in\s+your\b|in\s+a\/c\b|to\s+your\b|into\b|completed\b|successful\b)|[,.;/]|$)/i,
   },
   {
-    re: /\b(?:credited\s+(?:by|from)|deposited\s+by|from)\s+(?!(?:rs\.?|inr|vpa|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|\s+in\s+your|\s+in\s+a\/c|\s+to\s+your|\s+into|[,.;/]|$)/i,
+    re: /\b(?:credited\s+(?:by|from)|deposited\s+by|from)\s+(?!(?:rs\.?|inr|vpa|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+[A-Za-z0-9._-]+@|\s*(?:rs\.?|inr|₹)|\s+(?:on\b|via\b|ref|using\b|through\b|in\s+your\b|in\s+a\/c\b|to\s+your\b|into\b|completed\b|successful\b)|[,.;/]|$)/i,
   },
   {
     re: /;\s*([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s+credited\b/i,
@@ -199,7 +199,7 @@ const EXPENSE_RECIPIENT_PATTERNS = [
     re: /\b(?:to|towards)\s+(?:vpa\s+)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\s*\(\s*(?!upi\b|ref\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)\s*\)/i,
   },
   {
-    re: /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|towards|to|at)\s+(?!(?:you|your|yours|a\/c|acct|account|self|vpa|rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+using|\s+through|[,.;/]|$)/i,
+    re: /\b(?:transfer\s+to|transferred\s+to|trf\s+to|paid\s+to|sent\s+to|towards|to|at)\s+(?!(?:you|your|yours|a\/c|acct|account|self|vpa|rs\.?|inr)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,40}?)(?:\s*\(|\s+[A-Za-z0-9._-]+@|\s*(?:rs\.?|inr|₹)|\s+(?:on\b|via\b|ref|using\b|through\b|from\b|debited\b|credited\b|transfer\b|transaction\b|upi\b|utr\b|completed\b|successful\b|done\b)|[,.;/]|$)/i,
   },
   {
     re: /\b(?:bill\s+(?:paid|payment)|recharged?)\b.*?\bfor\s+(?!(?:rs\.?|inr|your|a\/c|acct|account)\b)([A-Za-z][A-Za-z0-9&.'\- ]{1,35}?)(?:\s*\(|\s+on|\s+via|\s+ref|\s+successful|\s+completed|[,.;/]|$)/i,

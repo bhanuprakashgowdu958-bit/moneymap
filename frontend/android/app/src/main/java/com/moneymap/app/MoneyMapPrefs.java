@@ -9,6 +9,7 @@ public final class MoneyMapPrefs {
     private static final String KEY_BUDGET_CHECK_BASE = "budget_check_base";
     private static final String KEY_AUTO_TRACK = "auto_track_enabled";
     private static final String KEY_SMS_AUTO_TRACK = "sms_auto_track_enabled";
+    private static final String KEY_SCREEN_CAPTURE = "screen_capture_enabled";
     private static final String KEY_APP_GUARD = "app_guard_enabled";
     private static final String KEY_LAST_GUARD_ALERTS = "last_guard_alerts";
     private static final String KEY_PENDING_WEBHOOKS = "pending_webhook_queue";
@@ -50,6 +51,14 @@ public final class MoneyMapPrefs {
 
     public static void setSmsAutoTrackEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_SMS_AUTO_TRACK, enabled).apply();
+    }
+
+    public static boolean isScreenCaptureEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SCREEN_CAPTURE, true);
+    }
+
+    public static void setScreenCaptureEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_SCREEN_CAPTURE, enabled).apply();
     }
 
     public static boolean isAppGuardEnabled(Context context) {

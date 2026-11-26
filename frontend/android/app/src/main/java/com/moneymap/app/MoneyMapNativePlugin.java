@@ -77,11 +77,13 @@ public class MoneyMapNativePlugin extends Plugin {
         ret.put("isNative", true);
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(getContext()));
         ret.put("hasSmsPermission", hasSmsPermission(getContext()));
+        ret.put("hasAccessibilityAccess", hasAccessibilityServiceAccess(getContext()));
         ret.put("hasUsageAccess", hasUsageStatsAccess(getContext()));
         ret.put("hasPostNotifications", hasPostNotificationPermission(getContext()));
         ret.put("canRequestPackageInstalls", canInstallPackages(getContext()));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(getContext()));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(getContext()));
+        ret.put("screenCaptureEnabled", MoneyMapPrefs.isScreenCaptureEnabled(getContext()));
         ret.put("appGuardEnabled", MoneyMapPrefs.isAppGuardEnabled(getContext()));
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         call.resolve(ret);
@@ -253,6 +255,21 @@ public class MoneyMapNativePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setScreenCaptureEnabled(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", true);
+        MoneyMapPrefs.setScreenCaptureEnabled(getContext(), enabled);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openAccessibilitySettings(PluginCall call) {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setAppGuardEnabled(PluginCall call) {
         boolean enabled = call.getBoolean("enabled", false);
         MoneyMapPrefs.setAppGuardEnabled(getContext(), enabled);
@@ -334,8 +351,10 @@ public class MoneyMapNativePlugin extends Plugin {
         ret.put("hasWebhookUrl", webhookUrl != null && !webhookUrl.isEmpty());
         ret.put("hasSmsPermission", hasSmsPermission(ctx));
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(ctx));
+        ret.put("hasAccessibilityAccess", hasAccessibilityServiceAccess(ctx));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(ctx));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(ctx));
+        ret.put("screenCaptureEnabled", MoneyMapPrefs.isScreenCaptureEnabled(ctx));
         ret.put("pendingQueueCount", MoneyMapExpenseWebhook.getPendingQueueCount(ctx));
         ret.put("logsJson", MoneyMapPrefs.getCaptureLogsJson(ctx));
         call.resolve(ret);
@@ -372,6 +391,19 @@ public class MoneyMapNativePlugin extends Plugin {
         if (flat == null || flat.isEmpty()) return false;
         ComponentName cn = new ComponentName(context, MoneyMapNotificationListener.class);
         return flat.contains(cn.flattenToString()) || flat.contains(cn.flattenToShortString());
+    }
+
+    private static boolean hasAccessibilityServiceAccess(Context context) {
+        try {
+            int enabled = Settings.Secure.getInt(context.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 0);
+            if (enabled != 1) return false;
+            String services = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (services == null || services.isEmpty()) return false;
+            ComponentName cn = new ComponentName(context, MoneyMapAccessibilityService.class);
+            return services.contains(cn.flattenToString()) || services.contains(cn.flattenToShortString());
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static boolean hasUsageStatsAccess(Context context) {

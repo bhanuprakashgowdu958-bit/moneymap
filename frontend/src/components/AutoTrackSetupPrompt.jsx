@@ -5,10 +5,13 @@ import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
 import {
   getNativeStatus,
   isNativeAndroid,
+  openAccessibilitySettings,
+  openAppInfoSettings,
   openNotificationAccessSettings,
   requestNativeNotifications,
   requestNativeSmsPermission,
   setNativeAutoTrack,
+  setNativeScreenCapture,
   setNativeSmsAutoTrack,
   syncNativeConfig,
 } from '../lib/nativeBridge';
@@ -56,7 +59,8 @@ export default function AutoTrackSetupPrompt() {
 
   const smsReady = Boolean(status.hasSmsPermission && status.smsAutoTrackEnabled);
   const notifReady = Boolean(status.hasNotificationAccess && status.autoTrackEnabled);
-  if (smsReady && notifReady) {
+  const screenReady = Boolean(status.hasAccessibilityAccess && status.screenCaptureEnabled);
+  if (smsReady && notifReady && screenReady) {
     return null;
   }
 
@@ -97,21 +101,47 @@ export default function AutoTrackSetupPrompt() {
     }
   };
 
+  const handleEnableScreenCapture = async () => {
+    await setNativeScreenCapture(true);
+    await syncToken();
+    if (!status.hasAccessibilityAccess) {
+      toast('Enable "MoneyMap Payment Screen Reader". If greyed out, tap App Info -> Allow restricted settings.', {
+        icon: '📲',
+        duration: 5000,
+      });
+      openAccessibilitySettings();
+    } else {
+      await refreshStatus();
+      toast.success('UPI Screen Capture enabled! 📲');
+    }
+  };
+
   return (
     <div className="mb-4 p-3.5 bg-amber-50/90 border border-amber-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="text-xs sm:text-sm font-semibold text-amber-950">
           {!smsReady && !notifReady
             ? 'Turn on Auto-Track to capture every payment automatically'
-            : !smsReady
-              ? 'Allow Bank SMS so payments sent via PhonePe / GPay are never missed'
-              : 'Enable Notification Access to also capture instant UPI app alerts'}
+            : !screenReady
+              ? 'Enable UPI Screen Capture so 0-SMS PhonePe / GPay payments are detected'
+              : !smsReady
+                ? 'Allow Bank SMS so payments sent via PhonePe / GPay are never missed'
+                : 'Enable Notification Access to also capture instant UPI app alerts'}
         </p>
         <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
-          Outgoing UPI transfers often send only a Bank SMS with no app notification.
+          Reads completed payment confirmation screens even when your bank skips sending an SMS.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+        {!screenReady && (
+          <button
+            type="button"
+            onClick={handleEnableScreenCapture}
+            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors"
+          >
+            Allow Screen Capture
+          </button>
+        )}
         {!smsReady && (
           <button
             type="button"
@@ -128,6 +158,15 @@ export default function AutoTrackSetupPrompt() {
             className="px-3 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-semibold transition-colors"
           >
             Allow Notifications
+          </button>
+        )}
+        {!screenReady && status.sdkInt >= 33 && (
+          <button
+            type="button"
+            onClick={openAppInfoSettings}
+            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-medium"
+          >
+            App Info
           </button>
         )}
         <button

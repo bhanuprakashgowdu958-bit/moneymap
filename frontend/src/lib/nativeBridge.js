@@ -28,10 +28,12 @@ export async function getNativeStatus() {
       isNative: false,
       hasNotificationAccess: false,
       hasSmsPermission: false,
+      hasAccessibilityAccess: false,
       hasUsageAccess: false,
       hasPostNotifications: true,
       autoTrackEnabled: false,
       smsAutoTrackEnabled: false,
+      screenCaptureEnabled: false,
       appGuardEnabled: false,
       sdkInt: 0,
     };
@@ -47,6 +49,16 @@ export async function setNativeAutoTrack(enabled) {
 export async function setNativeSmsAutoTrack(enabled) {
   if (!isNativeAndroid()) return;
   return MoneyMapNative.setSmsAutoTrackEnabled({ enabled });
+}
+
+export async function setNativeScreenCapture(enabled) {
+  if (!isNativeAndroid()) return;
+  return MoneyMapNative.setScreenCaptureEnabled({ enabled });
+}
+
+export async function openAccessibilitySettings() {
+  if (!isNativeAndroid()) return;
+  return MoneyMapNative.openAccessibilitySettings();
 }
 
 export async function requestNativeSmsPermission() {

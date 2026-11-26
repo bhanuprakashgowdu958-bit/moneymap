@@ -4,4 +4,5 @@
     <string name="title_activity_main">MoneyMap</string>
     <string name="package_name">com.moneymap.app</string>
     <string name="custom_url_scheme">com.moneymap.app</string>
+    <string name="accessibility_service_description">Detects completed payment confirmation screens inside PhonePe, Google Pay, Paytm, BHIM, Amazon Pay, and CRED even when your bank does not send an SMS alert.</string>
 </resources>
