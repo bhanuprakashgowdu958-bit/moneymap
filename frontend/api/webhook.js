@@ -442,11 +442,21 @@ export function parseTransactionSms(rawText, meta = {}) {
 
 const UPI_APP_PACKAGES = new Set([
   'com.phonepe.app',
+  'com.phonepe.app.business',
   'com.google.android.apps.nbu.paisa.user',
   'net.one97.paytm',
   'in.org.npci.upiapp',
   'in.amazon.mShop.android.shopping',
   'com.dreamplug.androidapp',
+  'com.naviapp',
+  'money.super.payments',
+  'in.gokiwi.kiwitpap',
+  'com.nextbillion.groww',
+  'com.fampay.in',
+  'indwin.c3.shareapp',
+  'com.tatadigital.tcp',
+  'com.infrasofttech.centralbank',
+  'com.infrasoft.uboi',
 ]);
 
 function extractTransferSideHint(segment) {
@@ -623,7 +633,7 @@ async function findAndMergeDuplicateTransaction(uid, parsed, nowIso) {
   return { duplicate: false };
 }
 
-async function persistTransactionLeg(uid, leg, nowIso) {
+async function persistTransactionLeg(uid, leg, nowIso, sourcePackage = '') {
   const dedupeCheck = await findAndMergeDuplicateTransaction(uid, leg, nowIso);
   if (dedupeCheck.duplicate) {
     return {
@@ -636,9 +646,14 @@ async function persistTransactionLeg(uid, leg, nowIso) {
     };
   }
 
-  const noteText = leg.type === 'income'
-    ? '💰 Auto-logged Income via Phone SMS / UPI'
-    : '📱 Auto-logged Expense via Phone SMS / UPI';
+  const isGmailSource = sourcePackage === 'gmail' || sourcePackage === 'com.google.android.gm';
+  const noteText = isGmailSource
+    ? (leg.type === 'income'
+        ? '📧 Auto-logged Income via Bank Email'
+        : '📧 Auto-logged Expense via Bank Email')
+    : (leg.type === 'income'
+        ? '💰 Auto-logged Income via Phone SMS / UPI'
+        : '📱 Auto-logged Expense via Phone SMS / UPI');
 
   const firestorePayload = {
     fields: {
@@ -740,7 +755,7 @@ export default async function handler(req, res) {
     let mergedAny = false;
     let lastReason = '';
     for (const leg of legsToProcess) {
-      const outcome = await persistTransactionLeg(uid, leg, nowIso);
+      const outcome = await persistTransactionLeg(uid, leg, nowIso, sourcePackage);
       if (outcome.saved) savedCount++;
       if (outcome.merged) mergedAny = true;
       if (outcome.reason) lastReason = outcome.reason;

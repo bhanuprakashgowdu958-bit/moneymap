@@ -4,6 +4,8 @@ import { Settings as SettingsIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
 import { consumePendingShare, isNativeAndroid, onSharedReceipt, syncNativeConfig } from '../lib/nativeBridge';
+import { autoSyncGmailIfConnected } from '../lib/gmailSync';
+import toast from 'react-hot-toast';
 import AutoTrackSetupPrompt from './AutoTrackSetupPrompt';
 
 const navItems = [
@@ -61,11 +63,40 @@ export default function Layout({ children }) {
   };
 
   useEffect(() => {
-    if (isNativeAndroid() && user?.uid && !isDemoUser(user.uid)) {
-      getOrCreateWebhookToken(user.uid)
-        .then((tok) => { if (tok) syncNativeConfig(tok); })
+    if (!user?.uid || isDemoUser(user.uid)) return undefined;
+
+    let cachedToken = '';
+    const runGmailAutoSync = () => {
+      autoSyncGmailIfConnected(user.uid, cachedToken)
+        .then((res) => {
+          if (res?.syncedCount > 0) {
+            toast.success(`📧 Synced ${res.syncedCount} bank email transaction${res.syncedCount > 1 ? 's' : ''}`);
+          }
+        })
         .catch(() => {});
-    }
+    };
+
+    getOrCreateWebhookToken(user.uid)
+      .then((tok) => {
+        if (tok) {
+          cachedToken = tok;
+          if (isNativeAndroid()) syncNativeConfig(tok);
+        }
+        runGmailAutoSync();
+      })
+      .catch(() => {
+        runGmailAutoSync();
+      });
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runGmailAutoSync();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [user]);
 
   useEffect(() => {

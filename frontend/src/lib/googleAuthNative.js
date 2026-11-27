@@ -69,6 +69,42 @@ export async function nativeGoogleSignIn() {
 }
 
 /**
+ * Authorize read-only Gmail access on native Android via Google Play Services.
+ * Returns { accessToken, email } without triggering Accessibility or READ_SMS checks.
+ */
+export async function nativeGoogleGmailAuth() {
+  if (!SocialLogin) {
+    await initNativeGoogleAuth();
+  }
+  if (!SocialLogin) {
+    throw new Error('Native Google Sign-In is not available');
+  }
+
+  const result = await SocialLogin.login({
+    provider: 'google',
+    options: {
+      scopes: [
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ],
+      forceRefreshToken: true,
+    },
+  });
+
+  const accessToken = result?.result?.accessToken?.token || '';
+  const profile = result?.result?.profile || {};
+  if (!accessToken) {
+    throw new Error('Google did not return a Gmail read-only access token.');
+  }
+
+  return {
+    accessToken,
+    email: profile.email || '',
+  };
+}
+
+/**
  * Sign out of native Google on Android.
  */
 export async function nativeGoogleSignOut() {

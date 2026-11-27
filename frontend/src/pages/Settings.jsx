@@ -23,6 +23,12 @@ import {
   getCurrentWebVersion,
   triggerOtaPrompt,
 } from '../lib/otaUpdater';
+import {
+  connectGmailSync,
+  disconnectGmailSync,
+  getGmailSyncState,
+  syncGmailTransactionsNow,
+} from '../lib/gmailSync';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
@@ -45,6 +51,8 @@ export default function Settings() {
   const [nativeDiag, setNativeDiag] = useState(null);
   const [showDiagLogs, setShowDiagLogs] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [gmailState, setGmailState] = useState(() => getGmailSyncState());
+  const [syncingGmail, setSyncingGmail] = useState(false);
   const fileInputRef = useRef(null);
   const onAndroidApp = isNativeAndroid();
 
@@ -759,6 +767,139 @@ export default function Settings() {
                 <li>Set Method to <strong>POST</strong>, Request Body to <strong>JSON</strong>, key <code className="bg-gray-100 px-1 rounded">text</code> = <strong>Shortcut Input</strong>.</li>
                 <li>Optional: Read <code className="bg-gray-100 px-1 rounded">budgetAlert</code> from the response and show a notification if not empty.</li>
               </ol>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Auto Bank Email Sync (Safe Play-Protect & NPCI 0-SMS Backup) */}
+      <div className="card border border-indigo-500/25 bg-gradient-to-br from-white to-indigo-500/5 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl flex-shrink-0">📧</span>
+            <h2 className="text-base font-semibold text-gray-900 truncate">Auto Bank Email Sync</h2>
+          </div>
+          <span
+            className={`text-xs px-2.5 py-0.5 rounded-full font-medium flex-shrink-0 border ${
+              gmailState.connected && !gmailState.needsReconnect
+                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                : gmailState.needsReconnect
+                ? 'bg-amber-100 text-amber-800 border-amber-300'
+                : 'bg-gray-100 text-gray-600 border-gray-200'
+            }`}
+          >
+            {gmailState.connected && !gmailState.needsReconnect
+              ? 'Active Auto-Sync'
+              : gmailState.needsReconnect
+              ? 'Reconnect Needed'
+              : '0-SMS Backup'}
+          </span>
+        </div>
+
+        <p className="text-xs text-gray-600 leading-relaxed">
+          Automatically imports bank debit &amp; credit alert emails whenever you open MoneyMap — catches transfers even when bank SMS is skipped or UPI apps block screen readers. Turn on free <strong>Email Alerts</strong> in your bank app for 100% coverage.
+        </p>
+
+        {isDemoUser(user?.uid) ? (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+            Sign in with a real MoneyMap account to connect read-only Bank Email Auto-Sync.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {gmailState.email && (
+              <p className="text-xs text-gray-600">
+                Account: <strong>{gmailState.email}</strong>
+                {gmailState.lastSyncAt > 0 && (
+                  <span className="text-gray-400">
+                    {' '}• Last synced {new Date(gmailState.lastSyncAt).toLocaleString()}
+                  </span>
+                )}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {!gmailState.connected || gmailState.needsReconnect ? (
+                <button
+                  type="button"
+                  disabled={syncingGmail}
+                  onClick={async () => {
+                    setSyncingGmail(true);
+                    try {
+                      const authRes = await connectGmailSync();
+                      if (!authRes.success) {
+                        toast.error(authRes.error || 'Could not connect Gmail.');
+                        setGmailState(getGmailSyncState());
+                        return;
+                      }
+                      const syncRes = await syncGmailTransactionsNow({
+                        userId: user.uid,
+                        webhookToken,
+                        allowInteractiveRefresh: false,
+                      });
+                      setGmailState(getGmailSyncState());
+                      if (syncRes.syncedCount > 0) {
+                        toast.success(`📧 Connected & imported ${syncRes.syncedCount} transaction(s)!`);
+                      } else {
+                        toast.success('📧 Gmail Auto-Sync connected! New bank emails sync automatically.');
+                      }
+                    } finally {
+                      setSyncingGmail(false);
+                    }
+                  }}
+                  className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  {syncingGmail
+                    ? 'Connecting & Scanning...'
+                    : gmailState.needsReconnect
+                    ? '🔄 Reconnect Gmail Alerts'
+                    : '📧 Connect Gmail Bank Alerts'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={syncingGmail}
+                  onClick={async () => {
+                    setSyncingGmail(true);
+                    try {
+                      const syncRes = await syncGmailTransactionsNow({
+                        userId: user.uid,
+                        webhookToken,
+                        allowInteractiveRefresh: true,
+                      });
+                      setGmailState(getGmailSyncState());
+                      if (syncRes.needsReconnect) {
+                        toast.error('Please tap Reconnect Gmail Alerts to refresh read access.');
+                      } else if (syncRes.syncedCount > 0) {
+                        toast.success(`📧 Synced ${syncRes.syncedCount} new bank email transaction(s)!`);
+                      } else if (syncRes.deduplicatedCount > 0) {
+                        toast.success(`Already up to date (${syncRes.deduplicatedCount} already logged via SMS/UPI)`);
+                      } else {
+                        toast.success('Bank emails checked — no new transactions found.');
+                      }
+                    } finally {
+                      setSyncingGmail(false);
+                    }
+                  }}
+                  className="btn-primary text-xs py-2 px-4 inline-flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  {syncingGmail ? 'Scanning Emails...' : '🔄 Sync Bank Emails Now'}
+                </button>
+              )}
+
+              {(gmailState.connected || gmailState.email) && (
+                <button
+                  type="button"
+                  disabled={syncingGmail}
+                  onClick={() => {
+                    disconnectGmailSync();
+                    setGmailState(getGmailSyncState());
+                    toast.success('Bank Email Auto-Sync disconnected.');
+                  }}
+                  className="btn-secondary text-xs py-2 px-3.5 text-gray-600"
+                >
+                  Disconnect
+                </button>
+              )}
             </div>
           </div>
         )}

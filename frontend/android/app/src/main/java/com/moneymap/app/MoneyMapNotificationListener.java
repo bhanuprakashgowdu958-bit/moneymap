@@ -15,10 +15,20 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
     private static final Set<String> PAYMENT_PACKAGES = new HashSet<>(Arrays.asList(
         "com.google.android.apps.nbu.paisa.user", // Google Pay
         "com.phonepe.app",                        // PhonePe
+        "com.phonepe.app.business",               // PhonePe Business
         "net.one97.paytm",                        // Paytm
         "in.org.npci.upiapp",                     // BHIM
         "in.amazon.mShop.android.shopping",       // Amazon Pay
-        "com.dreamplug.androidapp"                // CRED
+        "com.dreamplug.androidapp",               // CRED
+        "com.naviapp",                            // Navi UPI
+        "money.super.payments",                   // super.money
+        "in.gokiwi.kiwitpap",                     // Kiwi UPI
+        "com.nextbillion.groww",                  // Groww Pay / UPI
+        "com.fampay.in",                          // FamPay
+        "indwin.c3.shareapp",                     // Slice
+        "com.tatadigital.tcp",                    // Tata Neu UPI
+        "com.infrasofttech.centralbank",          // Cent Mobile
+        "com.infrasoft.uboi"                      // Union Bank Vyom
     ));
 
     private static final Set<String> SMS_PACKAGES = new HashSet<>(Arrays.asList(
@@ -156,6 +166,7 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
             || lowerPkg.contains("axis")
             || lowerPkg.contains("kotak")
             || lowerPkg.contains("union")
+            || lowerPkg.contains("vyom")
             || lowerPkg.contains("canara")
             || lowerPkg.contains("payzapp")
             || lowerPkg.contains("paisa")
@@ -163,7 +174,13 @@ public class MoneyMapNotificationListener extends NotificationListenerService {
             || lowerPkg.contains("jupiter")
             || lowerPkg.contains("mobikwik")
             || lowerPkg.contains("freecharge")
-            || lowerPkg.contains("slice");
+            || lowerPkg.contains("slice")
+            || lowerPkg.contains("navi")
+            || lowerPkg.contains("super.payments")
+            || lowerPkg.contains("kiwi")
+            || lowerPkg.contains("groww")
+            || lowerPkg.contains("fampay")
+            || lowerPkg.contains("tatadigital");
     }
 
     private static String charSeqToString(CharSequence cs) {
