@@ -1,5 +1,6 @@
 package com.moneymap.app;
 
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
@@ -24,6 +25,14 @@ public class MainActivity extends BridgeActivity {
         }
 
         MoneyMapExpenseWebhook.registerNetworkCallback(this);
+        MoneyMapNativePlugin.handleIncomingIntent(this, getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        MoneyMapNativePlugin.handleIncomingIntent(this, intent);
     }
 
     @Override

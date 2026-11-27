@@ -10,11 +10,9 @@ import {
   syncNativeConfig,
   setNativeAutoTrack,
   setNativeSmsAutoTrack,
-  setNativeScreenCapture,
   requestNativeSmsPermission,
   setNativeAppGuard,
   openNotificationAccessSettings,
-  openAccessibilitySettings,
   openUsageAccessSettings,
   openAppInfoSettings,
   requestNativeNotifications,
@@ -521,77 +519,6 @@ export default function Settings() {
                 )}
               </div>
 
-              {/* Toggle 1B: PhonePe / GPay Screen Capture (Zero-SMS Backup) */}
-              <div className="p-3.5 bg-white rounded-xl border border-blue-100 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-gray-900">UPI Screen Capture (0-SMS Backup)</p>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                        PhonePe / GPay / Paytm
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Reads completed payment screens directly when your bank does not send an SMS
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const next = !nativeStatus?.screenCaptureEnabled;
-                      await setNativeScreenCapture(next);
-                      await syncNativeConfig(webhookToken);
-                      refreshNativeStatus();
-                      if (next && !nativeStatus?.hasAccessibilityAccess) {
-                        openAccessibilitySettings();
-                      } else {
-                        toast.success(next ? 'UPI Screen Capture enabled! 📲' : 'UPI Screen Capture paused');
-                      }
-                    }}
-                    className={`w-12 h-7 rounded-full transition-colors flex-shrink-0 p-0.5 ${
-                      nativeStatus?.screenCaptureEnabled && nativeStatus?.hasAccessibilityAccess
-                        ? 'bg-emerald-600'
-                        : 'bg-gray-300'
-                    }`}
-                    aria-label="Toggle UPI screen capture"
-                  >
-                    <span
-                      className={`block w-6 h-6 bg-white rounded-full shadow transition-transform ${
-                        nativeStatus?.screenCaptureEnabled && nativeStatus?.hasAccessibilityAccess ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {!nativeStatus?.hasAccessibilityAccess ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 space-y-2">
-                    <p className="text-xs text-amber-900 font-medium">
-                      Enable <strong>MoneyMap Payment Screen Reader</strong> under Android Accessibility Services to catch 0-SMS PhonePe/GPay sends.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={openAccessibilitySettings}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700"
-                      >
-                        Open Accessibility Settings →
-                      </button>
-                      {nativeStatus?.sdkInt >= 33 && (
-                        <button
-                          type="button"
-                          onClick={openAppInfoSettings}
-                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900"
-                        >
-                          Greyed out? App Info (⋮ → Allow restricted)
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-emerald-700 font-semibold">✅ Payment Screen Reader Active</p>
-                )}
-              </div>
-
               {/* Toggle 2: Food App Budget Guard */}
               <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-2.5">
                 <div className="flex items-center justify-between gap-3">
@@ -677,9 +604,6 @@ export default function Settings() {
                     </span>
                     <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasNotificationAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
                       {nativeDiag.hasNotificationAccess ? '✓ Notification Access' : '✗ Notification Off'}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full ${nativeDiag.hasAccessibilityAccess ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
-                      {nativeDiag.hasAccessibilityAccess ? '✓ Screen Capture' : '✗ Screen Capture Off'}
                     </span>
                     {nativeDiag.pendingQueueCount > 0 && (
                       <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">

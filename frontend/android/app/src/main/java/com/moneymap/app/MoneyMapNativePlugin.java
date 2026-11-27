@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
+import android.util.Base64;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
@@ -23,9 +24,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
@@ -48,10 +51,15 @@ public class MoneyMapNativePlugin extends Plugin {
     private static final ExecutorService APK_EXECUTOR = Executors.newSingleThreadExecutor();
     private static final int MAX_REDIRECTS = 6;
     private static final long MIN_APK_BYTES = 100 * 1024L;
+    private static final int MAX_SHARED_IMAGE_BYTES = 8 * 1024 * 1024;
+    private static final Object SHARE_LOCK = new Object();
+    private static JSObject pendingSharePayload = null;
+    private static WeakReference<MoneyMapNativePlugin> activePluginRef = new WeakReference<>(null);
 
     @Override
     public void load() {
         super.load();
+        activePluginRef = new WeakReference<>(this);
         cleanupOldApkCache();
         requestNotificationListenerRebind(getContext());
         MoneyMapExpenseWebhook.registerNetworkCallback(getContext());
@@ -60,6 +68,85 @@ public class MoneyMapNativePlugin extends Plugin {
             Intent svc = new Intent(getContext(), AppGuardService.class);
             ContextCompat.startForegroundService(getContext(), svc);
         }
+    }
+
+    public static void handleIncomingIntent(Context ctx, Intent intent) {
+        if (ctx == null || intent == null) return;
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
+
+        Context appCtx = ctx.getApplicationContext();
+        APK_EXECUTOR.execute(() -> {
+            JSObject payload = extractSharePayload(appCtx, intent);
+            if (payload == null) return;
+            synchronized (SHARE_LOCK) {
+                pendingSharePayload = payload;
+            }
+            MoneyMapNativePlugin plugin = activePluginRef.get();
+            if (plugin != null) {
+                plugin.notifyListeners("sharedReceipt", payload);
+            }
+        });
+    }
+
+    private static JSObject extractSharePayload(Context ctx, Intent intent) {
+        String type = intent.getType();
+        if (type != null && type.startsWith("image/")) {
+            Uri streamUri = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class)
+                : intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (streamUri != null) {
+                try (InputStream in = ctx.getContentResolver().openInputStream(streamUri)) {
+                    if (in != null) {
+                        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                        byte[] buf = new byte[16 * 1024];
+                        int read;
+                        int total = 0;
+                        while ((read = in.read(buf)) != -1) {
+                            total += read;
+                            if (total > MAX_SHARED_IMAGE_BYTES) return null;
+                            bos.write(buf, 0, read);
+                        }
+                        String resolvedMime = ctx.getContentResolver().getType(streamUri);
+                        if (resolvedMime == null || !resolvedMime.startsWith("image/")) {
+                            resolvedMime = type;
+                        }
+                        String b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+                        JSObject obj = new JSObject();
+                        obj.put("hasShare", true);
+                        obj.put("kind", "image");
+                        obj.put("mimeType", resolvedMime);
+                        obj.put("dataUrl", "data:" + resolvedMime + ";base64," + b64);
+                        return obj;
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (sharedText != null && !sharedText.trim().isEmpty()) {
+            JSObject obj = new JSObject();
+            obj.put("hasShare", true);
+            obj.put("kind", "text");
+            obj.put("text", sharedText.trim());
+            return obj;
+        }
+        return null;
+    }
+
+    @PluginMethod
+    public void consumePendingShare(PluginCall call) {
+        JSObject out;
+        synchronized (SHARE_LOCK) {
+            out = pendingSharePayload;
+            pendingSharePayload = null;
+        }
+        if (out == null) {
+            JSObject empty = new JSObject();
+            empty.put("hasShare", false);
+            call.resolve(empty);
+            return;
+        }
+        call.resolve(out);
     }
 
     @PluginMethod
@@ -77,13 +164,11 @@ public class MoneyMapNativePlugin extends Plugin {
         ret.put("isNative", true);
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(getContext()));
         ret.put("hasSmsPermission", hasSmsPermission(getContext()));
-        ret.put("hasAccessibilityAccess", hasAccessibilityServiceAccess(getContext()));
         ret.put("hasUsageAccess", hasUsageStatsAccess(getContext()));
         ret.put("hasPostNotifications", hasPostNotificationPermission(getContext()));
         ret.put("canRequestPackageInstalls", canInstallPackages(getContext()));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(getContext()));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(getContext()));
-        ret.put("screenCaptureEnabled", MoneyMapPrefs.isScreenCaptureEnabled(getContext()));
         ret.put("appGuardEnabled", MoneyMapPrefs.isAppGuardEnabled(getContext()));
         ret.put("sdkInt", Build.VERSION.SDK_INT);
         call.resolve(ret);
@@ -255,21 +340,6 @@ public class MoneyMapNativePlugin extends Plugin {
     }
 
     @PluginMethod
-    public void setScreenCaptureEnabled(PluginCall call) {
-        boolean enabled = call.getBoolean("enabled", true);
-        MoneyMapPrefs.setScreenCaptureEnabled(getContext(), enabled);
-        call.resolve();
-    }
-
-    @PluginMethod
-    public void openAccessibilitySettings(PluginCall call) {
-        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        getContext().startActivity(intent);
-        call.resolve();
-    }
-
-    @PluginMethod
     public void setAppGuardEnabled(PluginCall call) {
         boolean enabled = call.getBoolean("enabled", false);
         MoneyMapPrefs.setAppGuardEnabled(getContext(), enabled);
@@ -351,10 +421,8 @@ public class MoneyMapNativePlugin extends Plugin {
         ret.put("hasWebhookUrl", webhookUrl != null && !webhookUrl.isEmpty());
         ret.put("hasSmsPermission", hasSmsPermission(ctx));
         ret.put("hasNotificationAccess", hasNotificationListenerAccess(ctx));
-        ret.put("hasAccessibilityAccess", hasAccessibilityServiceAccess(ctx));
         ret.put("autoTrackEnabled", MoneyMapPrefs.isAutoTrackEnabled(ctx));
         ret.put("smsAutoTrackEnabled", MoneyMapPrefs.isSmsAutoTrackEnabled(ctx));
-        ret.put("screenCaptureEnabled", MoneyMapPrefs.isScreenCaptureEnabled(ctx));
         ret.put("pendingQueueCount", MoneyMapExpenseWebhook.getPendingQueueCount(ctx));
         ret.put("logsJson", MoneyMapPrefs.getCaptureLogsJson(ctx));
         call.resolve(ret);
@@ -391,19 +459,6 @@ public class MoneyMapNativePlugin extends Plugin {
         if (flat == null || flat.isEmpty()) return false;
         ComponentName cn = new ComponentName(context, MoneyMapNotificationListener.class);
         return flat.contains(cn.flattenToString()) || flat.contains(cn.flattenToShortString());
-    }
-
-    private static boolean hasAccessibilityServiceAccess(Context context) {
-        try {
-            int enabled = Settings.Secure.getInt(context.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 0);
-            if (enabled != 1) return false;
-            String services = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (services == null || services.isEmpty()) return false;
-            ComponentName cn = new ComponentName(context, MoneyMapAccessibilityService.class);
-            return services.contains(cn.flattenToString()) || services.contains(cn.flattenToShortString());
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     private static boolean hasUsageStatsAccess(Context context) {

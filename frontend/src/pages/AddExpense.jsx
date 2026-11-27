@@ -132,13 +132,9 @@ export default function AddExpense() {
     }
   };
 
-  // Handle Receipt Upload & Trigger Auto-OCR Amount Extraction
-  const handleReceiptChange = async (e) => {
-    const file = e.target.files[0];
+  // Process any receipt File (from file picker or Android Share Sheet)
+  const processReceiptFile = async (file) => {
     if (!file) return;
-
-    // Reset file input value so selecting the same file again triggers onChange
-    if (e.target) e.target.value = '';
 
     setReceiptFile(file);
     setReceiptPreview(URL.createObjectURL(file));
@@ -192,6 +188,42 @@ export default function AddExpense() {
     } finally {
       setIsScanningOcr(false);
     }
+  };
+
+  // Auto-consume receipt image or text shared into MoneyMap from PhonePe / Navi / GPay
+  const sharedParam = searchParams.get('shared');
+  useEffect(() => {
+    const shared = window.__moneymapPendingShare;
+    if (!shared || !shared.hasShare) return;
+    window.__moneymapPendingShare = null;
+
+    if (shared.kind === 'image' && shared.dataUrl) {
+      const mime = shared.mimeType || 'image/jpeg';
+      fetch(shared.dataUrl)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const ext = mime.includes('png') ? 'png' : 'jpg';
+          const file = new File([blob], `shared-receipt.${ext}`, { type: mime });
+          return processReceiptFile(file);
+        })
+        .catch(() => {
+          toast.error('Could not load shared receipt image');
+        });
+    } else if (shared.kind === 'text' && shared.text) {
+      handleMagicTextChange(shared.text);
+      toast.success('Parsed shared payment details! ✨');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedParam]);
+
+  // Handle Receipt Upload & Trigger Auto-OCR Amount Extraction
+  const handleReceiptChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Reset file input value so selecting the same file again triggers onChange
+    if (e.target) e.target.value = '';
+    await processReceiptFile(file);
   };
 
   const handleQuickAddAmount = (val) => {

@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getOrCreateWebhookToken, isDemoUser } from '../lib/firestore';
-import { isNativeAndroid, syncNativeConfig } from '../lib/nativeBridge';
+import { consumePendingShare, isNativeAndroid, onSharedReceipt, syncNativeConfig } from '../lib/nativeBridge';
 import AutoTrackSetupPrompt from './AutoTrackSetupPrompt';
 
 const navItems = [
@@ -67,6 +67,30 @@ export default function Layout({ children }) {
         .catch(() => {});
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!isNativeAndroid()) return undefined;
+    let cleanupListener = () => {};
+
+    const openSharedReceipt = (payload) => {
+      if (!payload?.hasShare) return;
+      window.__moneymapPendingShare = payload;
+      navigate(`/add-expense?shared=${Date.now()}`);
+    };
+
+    consumePendingShare().then(openSharedReceipt).catch(() => {});
+    onSharedReceipt((payload) => {
+      // Clear plugin buffer too if delivered via live event
+      consumePendingShare().catch(() => {});
+      openSharedReceipt(payload);
+    }).then((unsub) => {
+      cleanupListener = unsub;
+    });
+
+    return () => {
+      cleanupListener();
+    };
+  }, [navigate]);
 
   const handleLogout = () => {
     logout();
